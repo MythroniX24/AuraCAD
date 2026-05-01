@@ -290,15 +290,15 @@ class MainActivity : AppCompatActivity() {
                     toast("Long-press a mesh on the canvas to select it")
                 }
             }
-            Tool.MOVE, Tool.ROTATE, Tool.SCALE -> {
-                if (selectedMeshIdx < 0) {
-                    toast("Long-press a mesh to select it first, then choose Move/Rotate/Scale")
-                    activeTool = Tool.NONE
-                    updateToolButtons()
-                } else {
-                    // Open editor — NOT mesh info. This was the bug.
-                    openEditor()
-                }
+            Tool.MOVE -> {
+                openMoveTool()
+            }
+            Tool.ROTATE -> {
+                openRotateTool()
+            }
+            Tool.SCALE -> {
+                // Scale via editor dimensions panel
+                openEditor()
             }
             Tool.RING -> {
                 // Pass selectedMeshIdx so ring tool auto-targets the selected mesh
@@ -738,6 +738,14 @@ class MainActivity : AppCompatActivity() {
     private fun openEditor() {
         if (supportFragmentManager.findFragmentByTag(EditorPanelFragment.TAG) != null) return
         EditorPanelFragment.newInstance().show(supportFragmentManager, EditorPanelFragment.TAG)
+    }
+    private fun openMoveTool() {
+        if (supportFragmentManager.findFragmentByTag(MoveToolFragment.TAG) != null) return
+        MoveToolFragment.newInstance().show(supportFragmentManager, MoveToolFragment.TAG)
+    }
+    private fun openRotateTool() {
+        if (supportFragmentManager.findFragmentByTag(RotateToolFragment.TAG) != null) return
+        RotateToolFragment.newInstance().show(supportFragmentManager, RotateToolFragment.TAG)
     }
     private fun openMeshList() {
         if (supportFragmentManager.findFragmentByTag(MeshListFragment.TAG) != null) return
