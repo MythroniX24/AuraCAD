@@ -116,8 +116,8 @@ class RotateToolFragment : BottomSheetDialogFragment() {
                 addView(tvVal)
             })
             addView(SeekBar(ctx).apply {
-                max = 1000
-                progress = ((init - min) / (max - min) * 1000).toInt().coerceIn(0, 1000)
+                setMax(1000)
+                progress = ((init - min) / (max - min) * 1000f).toInt().coerceIn(0, 1000)
                 progressTintList = android.content.res.ColorStateList.valueOf(tint)
                 thumbTintList    = android.content.res.ColorStateList.valueOf(tint)
                 setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
