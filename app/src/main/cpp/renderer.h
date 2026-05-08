@@ -183,7 +183,6 @@ public:
     bool exportOBJ(const std::string& path) const;
     // exportSTL already declared
     bool exportPLY(const std::string& path) const;
-    bool exportPLY(const std::string& path) const;
     bool combineMeshes(const std::vector<int>& indices);
     void setMeshScaleMMDirect(int idx, float w, float h, float d);
     bool exportSTL(const std::string& path) const;
