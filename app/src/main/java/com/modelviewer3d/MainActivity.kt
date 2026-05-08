@@ -160,20 +160,16 @@ class MainActivity : AppCompatActivity() {
                 glView.queueEvent { NativeLib.nativeUndo() }
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
-                }, 80)
+                }, 100)
             }
             findViewById<View>(R.id.btnRedo).setOnClickListener {
                 glView.queueEvent { NativeLib.nativeRedo() }
                 android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
                     sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
-                }, 80)
+                }, 100)
             }
             findViewById<View>(R.id.btnReset).setOnClickListener {
-                glView.queueEvent {
-                    NativeLib.nativeResetAllTransforms()
-                    NativeLib.nativeResetCamera()
-                }
-                // Notify editor panel to refresh its dimension display
+                glView.queueEvent { NativeLib.nativeResetAllTransforms(); NativeLib.nativeResetCamera() }
                 sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
             }
 
@@ -290,20 +286,10 @@ class MainActivity : AppCompatActivity() {
                     toast("Long-press a mesh on the canvas to select it")
                 }
             }
-            Tool.MOVE -> {
-                openMoveTool()
-            }
-            Tool.ROTATE -> {
-                openRotateTool()
-            }
-            Tool.SCALE -> {
-                // Scale via editor dimensions panel
-                openEditor()
-            }
-            Tool.RING -> {
-                // Pass selectedMeshIdx so ring tool auto-targets the selected mesh
-                openRingTool(selectedMeshIdx)
-            }
+            Tool.MOVE   -> { openMoveTool() }
+            Tool.ROTATE -> { openRotateTool() }
+            Tool.SCALE -> { openEditor() }
+            Tool.RING   -> { openRingTool(selectedMeshIdx) }
             Tool.NONE -> { /* deactivated */ }
         }
     }
@@ -524,7 +510,7 @@ class MainActivity : AppCompatActivity() {
      * No permission required.
      */
     private suspend fun saveToMediaStoreDownloads(fileName: String, format: String) {
-        val mimeType = when(format) { "obj" -> "model/obj"; "stl" -> "model/stl"; "ply" -> "model/x-ply"; else -> "application/octet-stream" }
+        val mimeType = when(format) { "obj" -> "model/obj"; "stl" -> "model/stl"; else -> "application/octet-stream" }
 
         // Write native export to cache first (native needs a real file path)
         val cacheFile = File(cacheDir, fileName)
@@ -607,7 +593,6 @@ class MainActivity : AppCompatActivity() {
                 ok = when (format) {
                     "obj" -> NativeLib.nativeExportOBJ(outFile.absolutePath)
                     "stl" -> NativeLib.nativeExportSTL(outFile.absolutePath)
-                    "ply" -> NativeLib.nativeExportPLY(outFile.absolutePath)
                     else  -> false
                 }
             } catch (_: Exception) {}
@@ -723,22 +708,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────
-    private fun openRingTool(meshIdx: Int = -1) {
-        // Dismiss existing if open
-        (supportFragmentManager.findFragmentByTag(RingToolFragment.TAG)
-            as? RingToolFragment)?.dismiss()
-        RingToolFragment.newInstance(meshIdx).show(supportFragmentManager, RingToolFragment.TAG)
-    }
-    private fun openMeshInfo() {
-        (supportFragmentManager.findFragmentByTag(MeshInfoFragment.TAG) as? MeshInfoFragment)?.dismiss()
-        MeshInfoFragment.newInstance().show(supportFragmentManager, MeshInfoFragment.TAG)
-    }
-    // Keep old name for layout binding compatibility
-    private fun openMeshTools() = openMeshInfo()
-    private fun openEditor() {
-        if (supportFragmentManager.findFragmentByTag(EditorPanelFragment.TAG) != null) return
-        EditorPanelFragment.newInstance().show(supportFragmentManager, EditorPanelFragment.TAG)
-    }
     private fun openMoveTool() {
         if (supportFragmentManager.findFragmentByTag(MoveToolFragment.TAG) != null) return
         MoveToolFragment.newInstance().show(supportFragmentManager, MoveToolFragment.TAG)
@@ -746,6 +715,26 @@ class MainActivity : AppCompatActivity() {
     private fun openRotateTool() {
         if (supportFragmentManager.findFragmentByTag(RotateToolFragment.TAG) != null) return
         RotateToolFragment.newInstance().show(supportFragmentManager, RotateToolFragment.TAG)
+    }
+    private fun openBrushTool() {
+        if (supportFragmentManager.findFragmentByTag(BrushToolFragment.TAG) != null) return
+        BrushToolFragment.newInstance().show(supportFragmentManager, BrushToolFragment.TAG)
+    }
+    private fun openMeshInfo() {
+        if (supportFragmentManager.findFragmentByTag(MeshInfoFragment.TAG) != null) return
+        MeshInfoFragment.newInstance().show(supportFragmentManager, MeshInfoFragment.TAG)
+    }
+    private fun openRingTool(meshIdx: Int = -1) {
+        (supportFragmentManager.findFragmentByTag(RingToolFragment.TAG) as? RingToolFragment)?.dismiss()
+        RingToolFragment.newInstance(meshIdx).show(supportFragmentManager, RingToolFragment.TAG)
+    }
+    private fun openMeshTools() {
+        if (supportFragmentManager.findFragmentByTag(MeshToolsFragment.TAG) != null) return
+        MeshToolsFragment.newInstance().show(supportFragmentManager, MeshToolsFragment.TAG)
+    }
+    private fun openEditor() {
+        if (supportFragmentManager.findFragmentByTag(EditorPanelFragment.TAG) != null) return
+        EditorPanelFragment.newInstance().show(supportFragmentManager, EditorPanelFragment.TAG)
     }
     private fun openMeshList() {
         if (supportFragmentManager.findFragmentByTag(MeshListFragment.TAG) != null) return
@@ -759,127 +748,32 @@ class MainActivity : AppCompatActivity() {
      */
     private fun onMeshLongPressPicked(idx: Int) {
         if (idx < 0) {
-            toast("Long-press a mesh surface to select it")
-            return
-        }
-        // Update native selection
-        glView.queueEvent { NativeLib.nativeSelectMesh(idx) }
-
-        // Fetch mesh info and show quick-action sheet
-        glView.queueEvent {
-            val name = try { NativeLib.nativeGetMeshName(idx) } catch (_: Exception) { "Mesh #$idx" }
-            val stats = try { NativeLib.nativeGetMeshStats(idx) } catch (_: Exception) { FloatArray(9) }
-            runOnUiThread {
-                // Update selection chip in toolbar
-                selectionChip?.visibility = View.VISIBLE
-                tvSelectionLabel?.text = "$name  ·  #$idx"
-
-                // Show a quick-action dialog for the selected mesh
-                showMeshQuickActions(idx, name, stats)
-
-                // Broadcast so ring tool / editor can retarget this mesh
-                sendBroadcast(android.content.Intent(ACTION_SELECTED_MESH_CHANGED)
-                    .putExtra("idx", idx)
-                    .setPackage(packageName))
-            }
-        }
-    }
-
-    /**
-     * Quick-action bottom dialog after long-pressing a mesh.
-     * Shows basic stats + actions: Edit, Ring Tool, Delete, Hide.
-     */
-    private fun showMeshQuickActions(idx: Int, name: String, stats: FloatArray) {
-        val ctx = this
-        val dlg = com.google.android.material.bottomsheet.BottomSheetDialog(ctx)
-        val root = android.widget.LinearLayout(ctx).apply {
-            orientation = android.widget.LinearLayout.VERTICAL
-            setPadding(0, 0, 0, 32)
-            setBackgroundResource(R.drawable.bg_bottom_sheet)
-        }
-
-        // Handle bar
-        root.addView(android.widget.LinearLayout(ctx).apply {
-            gravity = android.view.Gravity.CENTER_HORIZONTAL; setPadding(0,14,0,0)
-            addView(android.view.View(ctx).apply {
-                setBackgroundColor(android.graphics.Color.parseColor("#404058"))
-                layoutParams = android.widget.LinearLayout.LayoutParams(48,4)
-            })
-        })
-
-        // Title: name + stats
-        root.addView(android.widget.TextView(ctx).apply {
-            text = "💎  $name"
-            textSize = 15f; setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(android.graphics.Color.WHITE); setPadding(20,14,20,2)
-        })
-        if (stats.size >= 9) {
-            root.addView(android.widget.TextView(ctx).apply {
-                text = "%.0f K verts  ·  %.0f K tris  ·  %.1f mm³".format(
-                    stats[5]/1000f, stats[6]/1000f, stats[1])
-                textSize = 10f; setTextColor(android.graphics.Color.parseColor("#606080"))
-                setPadding(20,0,20,12)
-            })
-        }
-
-        // Divider
-        root.addView(android.view.View(ctx).apply {
-            setBackgroundColor(android.graphics.Color.parseColor("#1A1A28"))
-            layoutParams = android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, 1)
-        })
-
-        fun actionBtn(emoji: String, label: String, color: String, action: () -> Unit) =
-            android.widget.LinearLayout(ctx).apply {
-                orientation = android.widget.LinearLayout.HORIZONTAL
-                gravity = android.view.Gravity.CENTER_VERTICAL
-                setPadding(20,0,20,0)
-                minimumHeight = 56
-                isClickable = true; isFocusable = true
-                background = ctx.getDrawable(R.drawable.bg_top_bar_btn)
-                addView(android.widget.TextView(ctx).apply {
-                    text = emoji; textSize = 20f; setPadding(0,0,14,0)
-                })
-                addView(android.widget.TextView(ctx).apply {
-                    text = label; textSize = 13f
-                    setTextColor(android.graphics.Color.parseColor(color))
-                    layoutParams = android.widget.LinearLayout.LayoutParams(0,
-                        android.widget.LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-                })
-                setOnClickListener { action(); dlg.dismiss() }
-            }
-
-        root.addView(actionBtn("✏️", "Edit Transform", "#00D4FF") { openEditor() })
-        root.addView(actionBtn("💍", "Ring Tool", "#FF9800") {
-            openRingTool(idx)  // pass selected idx to ring tool
-        })
-        root.addView(actionBtn("👁", "Toggle Visibility", "#9090B0") {
+            android.widget.Toast.makeText(
+                this, "No mesh under your finger", android.widget.Toast.LENGTH_SHORT
+            ).show()
+        } else {
+            // Cheap label fetch on GL thread, then update UI.
             glView.queueEvent {
-                val vis = NativeLib.nativeGetMeshVisible(idx)
-                NativeLib.nativeSetMeshVisible(idx, !vis)
+                val name = try { NativeLib.nativeGetMeshName(idx) } catch (_: Exception) { "Mesh #$idx" }
+                runOnUiThread {
+                    android.widget.Toast.makeText(
+                        this, "Selected: $name (#$idx)", android.widget.Toast.LENGTH_SHORT
+                    ).show()
+                }
             }
-        })
-        root.addView(actionBtn("🗑", "Delete Mesh", "#FF5252") {
-            glView.queueEvent { NativeLib.nativeDeleteMesh(idx) }
-            runOnUiThread {
-                selectionChip?.visibility = View.GONE
-                updateStatusBar()
-            }
-        })
-
-        val sv = android.widget.ScrollView(ctx)
-        sv.addView(root)
-        dlg.setContentView(sv)
-        dlg.show()
+        }
+        sendBroadcast(android.content.Intent(ACTION_SELECTED_MESH_CHANGED)
+            .putExtra("idx", idx)
+            .setPackage(packageName))
     }
 
     companion object {
-        const val ACTION_SELECTED_MESH_CHANGED = "com.modelviewer3d.SELECTED_MESH_CHANGED"
         /**
          * Broadcast emitted whenever the long-press selection changes.
          * Fragments (Transform Tool, Ring Tool) listen so their per-mesh
          * controls retarget the freshly picked mesh.
          */
+        const val ACTION_SELECTED_MESH_CHANGED = "com.modelviewer3d.SELECTED_MESH_CHANGED"
     }
 
     // ── Loading ───────────────────────────────────────────────────────────────

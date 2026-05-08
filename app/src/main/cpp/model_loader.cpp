@@ -9,11 +9,6 @@
 #include <algorithm>
 #include <limits>
 #include <cctype>
-// mmap / O_DIRECT for zero-copy large-file loading
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
 
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
@@ -194,42 +189,24 @@ bool ModelLoader::loadSTL(const std::string& path, ModelData& data) {
         return true;
     }
 
-    // ── Binary path: mmap the entire file for zero-copy access ─────────────────
-    // For a 500MB STL: ifstream = 500MB heap allocation during parse
-    //                  mmap    = demand-paged by kernel, peak RAM << file size
-    // mmap also removes one memcpy: data goes file → page cache → our iterator.
-    f.close();  // done with ifstream, switch to mmap
-    {
-        int fd2 = open(path.c_str(), O_RDONLY);
-        if (fd2 < 0) return false;
-        // MAP_POPULATE prefaults up to ~2MB of pages so the first loop
-        // iteration doesn't stall on page faults for small-medium files.
-        void* map = mmap(nullptr, (size_t)fileSize, PROT_READ,
-                         MAP_PRIVATE | MAP_POPULATE, fd2, 0);
-        close(fd2);
-        if (map == MAP_FAILED) return false;
-        // Tell kernel we will scan sequentially — enables aggressive read-ahead
-        madvise(map, (size_t)fileSize, MADV_SEQUENTIAL);
-
-        const uint8_t* raw = static_cast<const uint8_t*>(map) + 84; // skip header+count
-
-        // Pre-allocate from mmap'd triCount — already validated above
-        data.vertices.reserve((size_t)triCount * 3);
-        data.indices .reserve((size_t)triCount * 3);
-
-        // Scan triangles directly from mapped memory — no extra allocation
-        for (uint32_t i = 0; i < triCount; ++i, raw += 50) {
-            const float* nf = reinterpret_cast<const float*>(raw);       // normal
-            const float* vf = reinterpret_cast<const float*>(raw + 12);  // 3×vertex
-            for (int j = 0; j < 3; ++j) {
-                Vertex v{};
-                v.px = vf[j*3+0]; v.py = vf[j*3+1]; v.pz = vf[j*3+2];
-                v.nx = nf[0];     v.ny = nf[1];      v.nz = nf[2];
-                data.indices.push_back((unsigned int)data.vertices.size());
-                data.vertices.push_back(v);
-            }
+    // Binary path — pre-allocate, but cap to avoid OOM on bad data
+    data.vertices.reserve((size_t)triCount * 3);
+    data.indices .reserve((size_t)triCount * 3);
+    for (uint32_t i = 0; i < triCount; ++i) {
+        float n[3], p[3][3];
+        f.read(reinterpret_cast<char*>(n), 12);
+        for (int j = 0; j < 3; ++j) f.read(reinterpret_cast<char*>(p[j]), 12);
+        uint16_t att; f.read(reinterpret_cast<char*>(&att), 2);
+        if (f.fail()) {
+            LOGE("STL: read failed at triangle %u/%u — file truncated?", i, triCount);
+            break;   // keep what we have so far
         }
-        munmap(map, (size_t)fileSize);
+        for (int j = 0; j < 3; ++j) {
+            Vertex v{}; v.px = p[j][0]; v.py = p[j][1]; v.pz = p[j][2];
+            v.nx = n[0]; v.ny = n[1]; v.nz = n[2];
+            data.indices.push_back((unsigned int)data.vertices.size());
+            data.vertices.push_back(v);
+        }
     }
     data.hasNormals = true;
     return !data.vertices.empty();

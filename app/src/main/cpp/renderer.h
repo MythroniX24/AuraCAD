@@ -73,6 +73,18 @@ struct RingState {
     std::vector<Vertex> origVerts;
 };
 
+
+// ── Frustum culling ────────────────────────────────────────────────────────────
+struct Frustum { float planes[6][4]; };
+
+// ── Brush state ───────────────────────────────────────────────────────────────
+struct BrushState {
+    bool  active=false, isSculpt=false;
+    float radius=0.05f, intensity=0.5f;
+    float hitX=0,hitY=0,hitZ=0;
+    int   hitMesh=-1;
+};
+
 class Renderer {
 public:
     Renderer(); ~Renderer();
@@ -159,11 +171,22 @@ public:
     // Separation helpers — called from JNI bridge (implementations in renderer.cpp)
 
     // Export
+    // Frustum culling
+    Frustum buildFrustum() const;
+    bool    frustumSphereTest(const Frustum& f, float cx, float cy, float cz, float r) const;
+    bool    isMeshVisible(const MeshObject& mo, const Frustum& f) const;
+
+    // Brush sculpting
+    void applySmooth(int meshIdx, float wx, float wy, float wz, float radius, float intensity);
+    void applySculpt(int meshIdx, float wx, float wy, float wz, float radius, float intensity, float sign);
+
     bool exportOBJ(const std::string& path) const;
+    // exportSTL already declared
+    bool exportPLY(const std::string& path) const;
+    bool exportPLY(const std::string& path) const;
+    bool combineMeshes(const std::vector<int>& indices);
+    void setMeshScaleMMDirect(int idx, float w, float h, float d);
     bool exportSTL(const std::string& path) const;
-    bool exportPLY(const std::string& path) const;   // Stanford PLY (text)
-    bool combineMeshes(const std::vector<int>& indices); // merge selected meshes into one
-    void setMeshScaleMMDirect(int idx, float w, float h, float d); // per-mesh scale (mm)
 
     // Ruler
     bool pickPoint(float sx,float sy,float sw,float sh,float out[3]);
@@ -250,6 +273,9 @@ private:
 
     // Production-grade mesh separator (reusable, preallocates buffers)
     MeshSeparator m_separator;
+    BrushState  m_brush;
+    Frustum     m_lastFrustum;
+    void buildMeshAdjacency(const MeshObject& mo, std::vector<std::vector<uint32_t>>& adj) const;
 
     // Ring deformation state
     RingState m_ring;

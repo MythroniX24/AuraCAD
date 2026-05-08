@@ -445,20 +445,16 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeRemoveZeroAreaFace
 }
 
 
-// ── New export + mesh ops ─────────────────────────────────────────────────────
-JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExportPLY(JNIEnv* env,jclass,jstring path){
-    LOCK_OR_FALSE(); return g_renderer->exportPLY(jstr(env,path)) ? JNI_TRUE : JNI_FALSE;
+// ── Brush sculpting ───────────────────────────────────────────────────────────
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySmooth(
+    JNIEnv*,jclass,jint idx,jfloat wx,jfloat wy,jfloat wz,jfloat radius,jfloat intensity){
+    LOCK_OR_VOID();
+    g_renderer->applySmooth((int)idx,(float)wx,(float)wy,(float)wz,(float)radius,(float)intensity);
 }
-JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeCombineMeshes(JNIEnv* env,jclass,jintArray arr){
-    LOCK_OR_FALSE();
-    jint* data = env->GetIntArrayElements(arr,nullptr);
-    jsize len  = env->GetArrayLength(arr);
-    std::vector<int> idx(data, data+len);
-    env->ReleaseIntArrayElements(arr,data,JNI_ABORT);
-    return g_renderer->combineMeshes(idx) ? JNI_TRUE : JNI_FALSE;
-}
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetMeshScaleMMDirect(JNIEnv*,jclass,jint idx,jfloat w,jfloat h,jfloat d){
-    LOCK_OR_VOID(); g_renderer->setMeshScaleMMDirect((int)idx,(float)w,(float)h,(float)d);
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySculpt(
+    JNIEnv*,jclass,jint idx,jfloat wx,jfloat wy,jfloat wz,jfloat radius,jfloat intensity,jfloat sign){
+    LOCK_OR_VOID();
+    g_renderer->applySculpt((int)idx,(float)wx,(float)wy,(float)wz,(float)radius,(float)intensity,(float)sign);
 }
 
 } // extern "C"

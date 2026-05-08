@@ -320,6 +320,7 @@ void Renderer::draw(){
     updateFPS();
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     if(m_meshes.empty()||!m_mainProg||!m_wireProg) return;
+    m_lastFrustum = buildFrustum();
 
     float aspect=(float)m_width/std::max(m_height,1);
     Mat4 proj=Mat4::perspective(60.0f*DEG2RAD,aspect,0.01f,100.0f);
@@ -331,6 +332,17 @@ void Renderer::draw(){
 
     for(auto& mo:m_meshes){
         if(!mo.visible||!mo.gpuReady) continue;
+        // ── Frustum cull: skip meshes fully outside camera view ────────────────
+        {
+            float cx=0.5f*(mo.bboxMin[0]+mo.bboxMax[0]);
+            float cy=0.5f*(mo.bboxMin[1]+mo.bboxMax[1]);
+            float cz=0.5f*(mo.bboxMin[2]+mo.bboxMax[2]);
+            float dx=mo.bboxMax[0]-mo.bboxMin[0];
+            float dy=mo.bboxMax[1]-mo.bboxMin[1];
+            float dz=mo.bboxMax[2]-mo.bboxMin[2];
+            float r=sqrtf(dx*dx+dy*dy+dz*dz)*0.6f;
+            if(!frustumSphereTest(m_lastFrustum,cx,cy,cz,r)) continue;
+        }
         Mat4 meshMat = buildMeshMatrix(mo);
         Mat4 model   = global * meshMat;
         Mat4 mvp     = proj*view*model;
@@ -1793,126 +1805,119 @@ void Renderer::applyRingDeformation(float newInnerN, float newOuterN) {
 
 
 
-// ── PLY Export (Stanford format, ASCII) ──────────────────────────────────────
-bool Renderer::exportPLY(const std::string& path) const {
-    // Count visible verts + tris for header
-    size_t totalV = 0, totalT = 0;
-    Mat4 global = buildGlobalMatrix();
-    for (const auto& mo : m_meshes) {
-        if (!mo.visible) continue;
-        totalV += mo.vertices.size();
-        totalT += mo.indices.size() / 3;
-    }
-    if (!totalV || !totalT) return false;
+// ══════════════════════════════════════════════════════════════════════════════
+// FRUSTUM CULLING + BRUSH SCULPTING ENGINE
+// ══════════════════════════════════════════════════════════════════════════════
 
-    std::ofstream f(path);
-    if (!f) return false;
-    f << "ply\nformat ascii 1.0\n";
-    f << "element vertex " << totalV << "\n";
-    f << "property float x\nproperty float y\nproperty float z\n";
-    f << "property float nx\nproperty float ny\nproperty float nz\n";
-    f << "element face " << totalT << "\n";
-    f << "property list uchar int vertex_indices\n";
-    f << "end_header\n";
-    f << std::fixed; f.precision(6);
-
-    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
-    size_t baseV = 0;
-    for (const auto& mo : m_meshes) {
-        if (!mo.visible) continue;
-        Mat4 model = global * buildMeshMatrix(mo);
-        for (const auto& v : mo.vertices) {
-            Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
-            Vec3 n = applyMat4Normal(model, v.nx, v.ny, v.nz);
-            f << p.x*toMM << " " << p.y*toMM << " " << p.z*toMM << " "
-              << n.x << " " << n.y << " " << n.z << "\n";
-        }
+Frustum Renderer::buildFrustum() const {
+    float aspect=(float)m_width/std::max(m_height,1);
+    Mat4 view=Mat4::lookAt(cameraEye(),Vec3{m_panX,m_panY,0.f},Vec3{0,1,0});
+    Mat4 proj=Mat4::perspective(45.f*(3.14159265f/180.f),aspect,0.01f,100.f);
+    Mat4 vp=proj*view;
+    Frustum f;
+    // Gribb-Hartmann frustum plane extraction
+    for(int i=0;i<4;i++){f.planes[0][i]=vp.m[i*4+3]+vp.m[i*4+0]; // left
+                           f.planes[1][i]=vp.m[i*4+3]-vp.m[i*4+0]; // right
+                           f.planes[2][i]=vp.m[i*4+3]+vp.m[i*4+1]; // bottom
+                           f.planes[3][i]=vp.m[i*4+3]-vp.m[i*4+1]; // top
+                           f.planes[4][i]=vp.m[i*4+3]+vp.m[i*4+2]; // near
+                           f.planes[5][i]=vp.m[i*4+3]-vp.m[i*4+2]; // far
     }
-    size_t offset = 0;
-    for (const auto& mo : m_meshes) {
-        if (!mo.visible) continue;
-        for (size_t i = 0; i + 2 < mo.indices.size(); i += 3) {
-            f << "3 " << (offset + mo.indices[i]) << " "
-                      << (offset + mo.indices[i+1]) << " "
-                      << (offset + mo.indices[i+2]) << "\n";
-        }
-        offset += mo.vertices.size();
+    for(int p=0;p<6;p++){
+        float len=sqrtf(f.planes[p][0]*f.planes[p][0]+f.planes[p][1]*f.planes[p][1]+f.planes[p][2]*f.planes[p][2]);
+        if(len>1e-9f) for(int i=0;i<4;i++) f.planes[p][i]/=len;
+    }
+    return f;
+}
+
+bool Renderer::frustumSphereTest(const Frustum& f,float cx,float cy,float cz,float r) const {
+    for(int p=0;p<6;p++){
+        float d=f.planes[p][0]*cx+f.planes[p][1]*cy+f.planes[p][2]*cz+f.planes[p][3];
+        if(d < -r) return false;
     }
     return true;
 }
 
-// ── Combine selected meshes into one ─────────────────────────────────────────
-// Fuses all selected mesh indices into a single MeshObject at index 0 of the
-// resulting mesh list. Other (unselected) meshes are kept intact.
-bool Renderer::combineMeshes(const std::vector<int>& indices) {
-    if (indices.size() < 2) return false;
-    // Validate all indices
-    for (int idx : indices) {
-        if (idx < 0 || idx >= (int)m_meshes.size()) return false;
-    }
-    pushUndoState();
-
-    Mat4 global = buildGlobalMatrix();
-    MeshObject combined;
-    combined.name = "Combined";
-    combined.colorR = m_meshes[indices[0]].colorR;
-    combined.colorG = m_meshes[indices[0]].colorG;
-    combined.colorB = m_meshes[indices[0]].colorB;
-    combined.scaX = combined.scaY = combined.scaZ = 1.f;
-
-    size_t baseVert = 0;
-    for (int idx : indices) {
-        const auto& mo = m_meshes[idx];
-        Mat4 model = global * buildMeshMatrix(mo);
-        for (const auto& v : mo.vertices) {
-            Vertex nv = v;
-            Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
-            Vec3 n = applyMat4Normal(model, v.nx, v.ny, v.nz);
-            nv.px = p.x; nv.py = p.y; nv.pz = p.z;
-            nv.nx = n.x; nv.ny = n.y; nv.nz = n.z;
-            combined.vertices.push_back(nv);
-        }
-        for (auto ind : mo.indices)
-            combined.indices.push_back((unsigned int)(ind + baseVert));
-        baseVert += mo.vertices.size();
-    }
-
-    // Upload combined mesh
-    uploadMeshObject(combined);
-
-    // Remove merged meshes (reverse order to keep indices valid)
-    std::vector<int> sorted = indices;
-    std::sort(sorted.rbegin(), sorted.rend());
-    for (int idx : sorted) {
-        if (m_meshes[idx].vao) glDeleteVertexArrays(1, &m_meshes[idx].vao);
-        if (m_meshes[idx].vbo) glDeleteBuffers(1, &m_meshes[idx].vbo);
-        if (m_meshes[idx].ibo) glDeleteBuffers(1, &m_meshes[idx].ibo);
-        m_meshes.erase(m_meshes.begin() + idx);
-    }
-    m_meshes.insert(m_meshes.begin(), std::move(combined));
-    m_selectedMesh = 0;
-    LOGI("combineMeshes: %zu meshes → 1 combined", indices.size());
-    return true;
+bool Renderer::isMeshVisible(const MeshObject& mo,const Frustum& f) const {
+    float cx=0.5f*(mo.bboxMin[0]+mo.bboxMax[0]);
+    float cy=0.5f*(mo.bboxMin[1]+mo.bboxMax[1]);
+    float cz=0.5f*(mo.bboxMin[2]+mo.bboxMax[2]);
+    float dx=mo.bboxMax[0]-mo.bboxMin[0],dy=mo.bboxMax[1]-mo.bboxMin[1],dz=mo.bboxMax[2]-mo.bboxMin[2];
+    return frustumSphereTest(f,cx,cy,cz,sqrtf(dx*dx+dy*dy+dz*dz)*0.55f);
 }
 
-// ── Per-mesh scale in mm (direct, no ratio) ───────────────────────────────────
-void Renderer::setMeshScaleMMDirect(int idx, float wMM, float hMM, float dMM) {
-    if (idx < 0 || idx >= (int)m_meshes.size()) return;
-    auto& mo = m_meshes[idx];
-    // Compute original bbox of this mesh
-    float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX;
-    float mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
-    for (const auto& v : mo.vertices) {
-        mnX=std::min(mnX,v.px); mxX=std::max(mxX,v.px);
-        mnY=std::min(mnY,v.py); mxY=std::max(mxY,v.py);
-        mnZ=std::min(mnZ,v.pz); mxZ=std::max(mxZ,v.pz);
+// ── Brush adjacency ────────────────────────────────────────────────────────────
+void Renderer::buildMeshAdjacency(const MeshObject& mo,
+                                   std::vector<std::vector<uint32_t>>& adj) const {
+    const size_t N=mo.vertices.size();
+    adj.assign(N,{});
+    for(size_t i=0;i+2<mo.indices.size();i+=3){
+        uint32_t a=mo.indices[i],b=mo.indices[i+1],c2=mo.indices[i+2];
+        adj[a].push_back(b); adj[a].push_back(c2);
+        adj[b].push_back(a); adj[b].push_back(c2);
+        adj[c2].push_back(a); adj[c2].push_back(b);
     }
-    float origW = (mxX-mnX); float origH = (mxY-mnY); float origD = (mxZ-mnZ);
-    float toNorm = (m_normalizeScale > 1e-9f) ? m_normalizeScale : 1.f;
-    // Scale factors: desired_mm * normalizeScale / original_normalized_size
-    if (origW > 1e-9f) mo.scaX = (wMM * toNorm) / origW;
-    if (origH > 1e-9f) mo.scaY = (hMM * toNorm) / origH;
-    if (origD > 1e-9f) mo.scaZ = (dMM * toNorm) / origD;
+}
+
+static inline float gaussFalloff(float d2,float r2){
+    float t=d2/r2; if(t>=1.f) return 0.f;
+    float t3=t*t*t;
+    return 1.f-t3*(10.f-t*(15.f-t*6.f));
+}
+
+// ── Smooth brush (Laplacian relaxation) ────────────────────────────────────────
+void Renderer::applySmooth(int meshIdx,float wx,float wy,float wz,float radius,float intensity){
+    if(meshIdx<0||meshIdx>=(int)m_meshes.size()) return;
+    auto& mo=m_meshes[meshIdx];
+    if(mo.vertices.empty()) return;
+    float r2=radius*radius;
+    std::vector<std::vector<uint32_t>> adj;
+    buildMeshAdjacency(mo,adj);
+    const size_t N=mo.vertices.size();
+    // Collect affected vertices
+    struct VW{size_t i;float w;};
+    std::vector<VW> affected; affected.reserve(512);
+    for(size_t i=0;i<N;i++){
+        const auto& v=mo.vertices[i];
+        float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;
+        float w=gaussFalloff(dx*dx+dy*dy+dz*dz,r2);
+        if(w>0.001f) affected.push_back({i,w});
+    }
+    if(affected.empty()) return;
+    // Laplacian step
+    std::vector<Vec3> np(N);
+    for(size_t i=0;i<N;i++) np[i]={mo.vertices[i].px,mo.vertices[i].py,mo.vertices[i].pz};
+    for(auto& vw:affected){
+        const auto& nb=adj[vw.i]; if(nb.empty()) continue;
+        float cx=0,cy=0,cz=0;
+        for(uint32_t n:nb){cx+=mo.vertices[n].px;cy+=mo.vertices[n].py;cz+=mo.vertices[n].pz;}
+        float inv=1.f/(float)nb.size(); cx*=inv;cy*=inv;cz*=inv;
+        float d=intensity*vw.w;
+        np[vw.i].x+=d*(cx-np[vw.i].x);
+        np[vw.i].y+=d*(cy-np[vw.i].y);
+        np[vw.i].z+=d*(cz-np[vw.i].z);
+    }
+    for(auto& vw:affected){mo.vertices[vw.i].px=np[vw.i].x;mo.vertices[vw.i].py=np[vw.i].y;mo.vertices[vw.i].pz=np[vw.i].z;}
+    regenerateNormals(mo); updateMeshVBO(mo);
+}
+
+// ── Sculpt brush (normal displacement: +1=raise, -1=lower) ────────────────────
+void Renderer::applySculpt(int meshIdx,float wx,float wy,float wz,float radius,float intensity,float sign){
+    if(meshIdx<0||meshIdx>=(int)m_meshes.size()) return;
+    auto& mo=m_meshes[meshIdx];
+    if(mo.vertices.empty()) return;
+    float r2=radius*radius;
+    const size_t N=mo.vertices.size();
+    bool any=false;
+    for(size_t i=0;i<N;i++){
+        auto& v=mo.vertices[i];
+        float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;
+        float w=gaussFalloff(dx*dx+dy*dy+dz*dz,r2);
+        if(w<0.001f) continue;
+        float d=sign*intensity*w;
+        v.px+=d*v.nx; v.py+=d*v.ny; v.pz+=d*v.nz; any=true;
+    }
+    if(any){regenerateNormals(mo); updateMeshVBO(mo);}
 }
 
 // ── Raycasting ───────────────────────────────────────────────────────────────
