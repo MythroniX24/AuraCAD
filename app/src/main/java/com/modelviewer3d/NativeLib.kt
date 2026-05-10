@@ -5,6 +5,8 @@ object NativeLib {
     external fun nativeResize(width: Int, height: Int)
     external fun nativeDraw()
     external fun nativeDestroy()
+    external fun nativeOnContextLost()
+    external fun nativeRebuildContext()
 
     // Model loading
     external fun nativeParseModel(path: String): Boolean
@@ -23,7 +25,7 @@ object NativeLib {
     external fun nativeTouchPan(dx: Float, dy: Float)
     external fun nativeResetCamera()
 
-    // Transforms
+    // Global transforms
     external fun nativeSetRotation(x: Float, y: Float, z: Float)
     external fun nativeSetTranslation(x: Float, y: Float, z: Float)
     external fun nativeSetScaleMM(w: Float, h: Float, d: Float)
@@ -41,6 +43,7 @@ object NativeLib {
     external fun nativeSetBoundingBox(on: Boolean)
 
     // Undo/redo
+    external fun nativePushUndoState()
     external fun nativeUndo()
     external fun nativeRedo()
 
@@ -53,6 +56,7 @@ object NativeLib {
     external fun nativeGetMeshName(idx: Int): String
     external fun nativeSelectMesh(idx: Int)
     external fun nativeGetSelectedMesh(): Int
+    external fun nativePickMesh(sx: Float, sy: Float, sw: Float, sh: Float): Int
     external fun nativeDeleteMesh(idx: Int)
     external fun nativeSetMeshVisible(idx: Int, visible: Boolean)
     external fun nativeGetMeshVisible(idx: Int): Boolean
@@ -60,6 +64,12 @@ object NativeLib {
     external fun nativeSetMeshScaleMM(idx: Int, w: Float, h: Float, d: Float)
     external fun nativeGetMeshSizeMM(idx: Int): FloatArray
     external fun nativeGetMeshVertexCount(idx: Int): Int
+
+    // Per-mesh transforms
+    external fun nativeSetMeshRotation(idx: Int, rx: Float, ry: Float, rz: Float)
+    external fun nativeSetMeshTranslation(idx: Int, tx: Float, ty: Float, tz: Float)
+    external fun nativeGetMeshTransform(idx: Int): FloatArray  // [rx,ry,rz,tx,ty,tz]
+    external fun nativeResetMeshTransform(idx: Int)
 
     // Export
     external fun nativeExportOBJ(path: String): Boolean
@@ -70,9 +80,13 @@ object NativeLib {
     external fun nativeCombineMeshes(indices: IntArray): Boolean
     external fun nativeSetMeshScaleMMDirect(meshIdx: Int, w: Float, h: Float, d: Float)
 
-    // Mesh stats
-    /** [surfaceAreaMM2, volumeMM3, bboxW, bboxH, bboxD, verts, tris, edges, watertight] */
+    // Mesh stats: [surfaceAreaMM2, volumeMM3, bboxW, bboxH, bboxD, verts, tris, edges, watertight]
     external fun nativeGetMeshStats(meshIdx: Int): FloatArray
+
+    // Mesh processing (MeshLab algorithms)
+    external fun nativeDecimateMesh(meshIdx: Int, targetPercent: Float): Boolean
+    external fun nativeWeldVertices(meshIdx: Int, epsilonMM: Float): Int
+    external fun nativeRemoveZeroAreaFaces(meshIdx: Int): Int
 
     // Ruler
     external fun nativePickPoint(sx: Float, sy: Float, sw: Float, sh: Float): FloatArray?
@@ -90,13 +104,9 @@ object NativeLib {
     external fun nativeResetRingDeformation()
     external fun nativeIsRingAnalyzed(): Boolean
 
-    // ── Brush sculpting ────────────────────────────────────────────────────────
-    /** Smooth/polish brush — Laplacian relaxation at world point (wx,wy,wz) */
-    external fun nativeApplySmooth(meshIdx: Int, wx: Float, wy: Float, wz: Float,
-                                   radius: Float, intensity: Float)
-    /** Height/sculpt brush — displace surface along normals. sign=+1 raise, -1 lower */
-    external fun nativeApplySculpt(meshIdx: Int, wx: Float, wy: Float, wz: Float,
-                                   radius: Float, intensity: Float, sign: Float)
+    // Brush sculpting
+    external fun nativeApplySmooth(meshIdx: Int, wx: Float, wy: Float, wz: Float, radius: Float, intensity: Float)
+    external fun nativeApplySculpt(meshIdx: Int, wx: Float, wy: Float, wz: Float, radius: Float, intensity: Float, sign: Float)
 
     init { System.loadLibrary("modelviewer") }
 }

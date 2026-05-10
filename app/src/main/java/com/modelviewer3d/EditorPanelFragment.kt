@@ -164,29 +164,24 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
         root.addView(hdiv(ctx))
 
         root.addView(sec(ctx,"🎨  COLOR"))
-        for((lbl,tint,get,set) in listOf<Any>(
-            arrayOf("R","#FF5252",{colR},{v:Float->colR=v;glRun{NativeLib.nativeSetColor(colR,colG,colB)}}),
-            arrayOf("G","#4CAF82",{colG},{v:Float->colG=v;glRun{NativeLib.nativeSetColor(colR,colG,colB)}}),
-            arrayOf("B","#4FC3F7",{colB},{v:Float->colB=v;glRun{NativeLib.nativeSetColor(colR,colG,colB)}})
-        )){
-            @Suppress("UNCHECKED_CAST") val a=lbl as Array<Any>
+        fun colorSlider(label:String,tint:String,init:()->Float,onChg:(Float)->Unit){
             root.addView(LinearLayout(ctx).apply{
-                orientation=LinearLayout.HORIZONTAL; gravity=android.view.Gravity.CENTER_VERTICAL; setPadding(20,4,20,4)
-                addView(TextView(ctx).apply{text=a[0] as String;textSize=11f;setTextColor(Color.parseColor("#9090B0"))
+                orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(20,4,20,4)
+                addView(TextView(ctx).apply{text=label;textSize=11f;setTextColor(Color.parseColor("#9090B0"))
                     layoutParams=LinearLayout.LayoutParams(24,LinearLayout.LayoutParams.WRAP_CONTENT)})
                 addView(SeekBar(ctx).apply{
-                    setMax(100); progress=((a[2] as ()->Float)()*100).toInt()
-                    progressTintList=android.content.res.ColorStateList.valueOf(Color.parseColor(a[1] as String))
-                    thumbTintList=android.content.res.ColorStateList.valueOf(Color.parseColor(a[1] as String))
+                    setMax(100);progress=(init()*100).toInt()
+                    progressTintList=android.content.res.ColorStateList.valueOf(Color.parseColor(tint))
+                    thumbTintList=android.content.res.ColorStateList.valueOf(Color.parseColor(tint))
                     layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)
                     setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
                         override fun onStartTrackingTouch(b:SeekBar){}
                         override fun onStopTrackingTouch(b:SeekBar){}
-                        override fun onProgressChanged(b:SeekBar,p:Int,fromUser:Boolean){if(fromUser)(a[3] as (Float)->Unit)(p/100f)}
-                    })
-                })
-            })
+                        override fun onProgressChanged(b:SeekBar,p:Int,fromUser:Boolean){if(fromUser)onChg(p/100f)}})})})
         }
+        colorSlider("R","#FF5252",{colR}){v->colR=v;glRun{NativeLib.nativeSetColor(colR,colG,colB)}}
+        colorSlider("G","#4CAF82",{colG}){v->colG=v;glRun{NativeLib.nativeSetColor(colR,colG,colB)}}
+        colorSlider("B","#4FC3F7",{colB}){v->colB=v;glRun{NativeLib.nativeSetColor(colR,colG,colB)}}
         root.addView(hdiv(ctx))
 
         root.addView(sec(ctx,"💡  MATERIAL"))
