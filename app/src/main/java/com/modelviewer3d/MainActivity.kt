@@ -64,6 +64,7 @@ class MainActivity : AppCompatActivity() {
     private var btnToolRotate: View? = null
     private var btnToolScale:  View? = null
     private var btnToolRing:   View? = null
+    private var btnToolBrush:  View? = null
 
     private var icToolSelect: ImageView? = null
     private var icToolMove:   ImageView? = null
@@ -182,6 +183,7 @@ class MainActivity : AppCompatActivity() {
             btnToolRotate?.setOnClickListener { onToolClicked(Tool.ROTATE) }
             btnToolScale ?.setOnClickListener { onToolClicked(Tool.SCALE)  }
             btnToolRing  ?.setOnClickListener { onToolClicked(Tool.RING)   }
+            btnToolBrush ?.setOnClickListener { onToolClicked(Tool.BRUSH)  }
 
             // ── Selection chip ───────────────────────────────────────────────
             findViewById<View?>(R.id.btnSelectionClear)?.setOnClickListener { clearSelection() }

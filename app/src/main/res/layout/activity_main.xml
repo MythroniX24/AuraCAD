@@ -400,6 +400,30 @@
                 android:paddingTop="3dp"
                 android:fontFamily="monospace"/>
         </LinearLayout>
+
+        <!-- Brush Sculpting Tool -->
+        <LinearLayout
+            android:id="@+id/btnToolBrush"
+            android:layout_width="52dp"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:clickable="true"
+            android:focusable="true"
+            android:background="?attr/selectableItemBackgroundBorderless">
+            <TextView
+                android:layout_width="28dp"
+                android:layout_height="28dp"
+                android:gravity="center"
+                android:text="🖌️"
+                android:textSize="16sp"/>
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Brush"
+                android:textSize="8sp"
+                android:textColor="#9090B0"/>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- ════════════════════════════════════════════════════════════════════

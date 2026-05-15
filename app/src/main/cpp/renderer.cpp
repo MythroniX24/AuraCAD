@@ -1576,130 +1576,109 @@ bool Renderer::analyzeRing(int meshIdx) {
     const size_t N = mo.vertices.size();
     if (N < 64) return false;
 
-    // ── Pass 1: crude centroid + covariance for initial axis ─────────────────
-    double cx = 0, cy = 0, cz = 0;
-    for (const auto& v : mo.vertices) { cx += v.px; cy += v.py; cz += v.pz; }
-    cx /= (double)N; cy /= (double)N; cz /= (double)N;
-    Vec3 cen0{(float)cx, (float)cy, (float)cz};
+    // ── Pass 1: centroid ─────────────────────────────────────────────────────
+    double cx=0,cy=0,cz=0;
+    for (const auto& v:mo.vertices){ cx+=v.px; cy+=v.py; cz+=v.pz; }
+    cx/=N; cy/=N; cz/=N;
+    Vec3 cen{(float)cx,(float)cy,(float)cz};
 
-    float C[3][3] = {};
-    for (const auto& v : mo.vertices) {
-        float d[3] = {v.px-(float)cx, v.py-(float)cy, v.pz-(float)cz};
-        for (int i=0;i<3;i++) for (int j=0;j<3;j++) C[i][j] += d[i]*d[j];
+    // ── Pass 2: PCA to get initial axis (smallest eigenvalue = through-hole) ─
+    float C[3][3]={};
+    for (const auto& v:mo.vertices){
+        float d[3]={v.px-(float)cx,v.py-(float)cy,v.pz-(float)cz};
+        for(int i=0;i<3;i++) for(int j=0;j<3;j++) C[i][j]+=d[i]*d[j];
     }
-    float Vmat[3][3];
-    jacobiEigen3(C, Vmat);
-    // Smallest eigenvalue → axis (least variance = through-hole direction)
-    Vec3 axis {Vmat[0][0], Vmat[1][0], Vmat[2][0]};
-    {
-        float alen = sqrtf(axis.x*axis.x + axis.y*axis.y + axis.z*axis.z);
-        if (alen < 1e-9f) return false;
-        axis.x /= alen; axis.y /= alen; axis.z /= alen;
-    }
+    float Vm[3][3]; jacobiEigen3(C,Vm);
+    Vec3 axis{Vm[0][0],Vm[1][0],Vm[2][0]};
+    float al=sqrtf(axis.x*axis.x+axis.y*axis.y+axis.z*axis.z);
+    if(al<1e-9f) return false;
+    axis.x/=al; axis.y/=al; axis.z/=al;
 
-    // ── Pass 2: compute radial distances, find innerR via 5th percentile ─────
+    // ── Pass 3: radial distances → median-based robust inner/outer radius ────
+    // Median is more robust than percentile for rings with stone settings
+    // because the stone creates a cluster of near-zero-radius vertices (prongs)
+    // that corrupt the percentile estimate.
     std::vector<float> radii(N);
-    float axMin = FLT_MAX, axMax = -FLT_MAX;
-    for (size_t i = 0; i < N; ++i) {
-        const auto& v = mo.vertices[i];
-        float dx = v.px-cen0.x, dy = v.py-cen0.y, dz = v.pz-cen0.z;
-        float along = dx*axis.x + dy*axis.y + dz*axis.z;
-        axMin = std::min(axMin, along); axMax = std::max(axMax, along);
-        float rx = dx-along*axis.x, ry = dy-along*axis.y, rz = dz-along*axis.z;
-        radii[i] = sqrtf(rx*rx + ry*ry + rz*rz);
+    float axMin=FLT_MAX,axMax=-FLT_MAX;
+    for(size_t i=0;i<N;i++){
+        const auto& v=mo.vertices[i];
+        float dx=v.px-cen.x,dy=v.py-cen.y,dz=v.pz-cen.z;
+        float along=dx*axis.x+dy*axis.y+dz*axis.z;
+        axMin=std::min(axMin,along); axMax=std::max(axMax,along);
+        float rx=dx-along*axis.x,ry=dy-along*axis.y,rz=dz-along*axis.z;
+        radii[i]=sqrtf(rx*rx+ry*ry+rz*rz);
     }
-    std::vector<float> sortedR = radii;
-    std::sort(sortedR.begin(), sortedR.end());
-    float p05 = sortedR[(size_t)(N * 0.05)];  // inner bore radius estimate
-    float p95 = sortedR[(size_t)(N * 0.95)];  // outer surface radius estimate
-    if (p95 - p05 < 1e-7f) return false;
+    // Partial sort — only need 3rd/10th/90th/97th percentile values
+    std::vector<float> sR=radii;
+    std::sort(sR.begin(),sR.end());
+    float p03=sR[(size_t)(N*0.03f)];
+    float p10=sR[(size_t)(N*0.10f)];
+    float p90=sR[(size_t)(N*0.90f)];
+    float p97=sR[(size_t)(N*0.97f)];
+    if(p97-p03<1e-7f) return false;
 
-    // ── Pass 3: refine centroid + axis using INNER BORE vertices ONLY ─────────
-    // Inner bore is a clean cylinder — texture only affects outer geometry.
-    // This makes axis detection immune to carved/embossed patterns.
-    float boreCut = p05 * 1.35f;  // inner bore: all verts with r < 135% of p05
-    double icx = 0, icy = 0, icz = 0;
-    int nBore = 0;
-    for (size_t i = 0; i < N; ++i) {
-        if (radii[i] <= boreCut) {
-            icx += mo.vertices[i].px;
-            icy += mo.vertices[i].py;
-            icz += mo.vertices[i].pz;
-            ++nBore;
-        }
+    // ── Pass 4: refine axis using INNER BORE vertices only ───────────────────
+    // Inner bore is a clean circle → most stable for axis detection.
+    // Reject stone settings (extreme inner/outer outliers) by using p10..p90 band.
+    float boreCut=p10*1.5f;
+    double icx=0,icy=0,icz=0; int nB=0;
+    for(size_t i=0;i<N;i++){
+        if(radii[i]<=boreCut){icx+=mo.vertices[i].px;icy+=mo.vertices[i].py;icz+=mo.vertices[i].pz;++nB;}
     }
-    Vec3 cen = cen0;  // default to crude centroid
-    Vec3 axisRefined = axis;
-
-    if (nBore >= 64) {
-        icx /= nBore; icy /= nBore; icz /= nBore;
-        Vec3 boreCen{(float)icx, (float)icy, (float)icz};
-
-        // Covariance from bore vertices only
-        float Cb[3][3] = {};
-        for (size_t i = 0; i < N; ++i) {
-            if (radii[i] > boreCut) continue;
-            float d[3] = {mo.vertices[i].px-(float)icx,
-                          mo.vertices[i].py-(float)icy,
-                          mo.vertices[i].pz-(float)icz};
-            for (int ii=0;ii<3;ii++) for (int jj=0;jj<3;jj++) Cb[ii][jj] += d[ii]*d[jj];
+    if(nB>=32){
+        icx/=nB; icy/=nB; icz/=nB;
+        Vec3 bCen{(float)icx,(float)icy,(float)icz};
+        float Cb[3][3]={};
+        for(size_t i=0;i<N;i++){
+            if(radii[i]>boreCut) continue;
+            float d[3]={mo.vertices[i].px-(float)icx,mo.vertices[i].py-(float)icy,mo.vertices[i].pz-(float)icz};
+            for(int ii=0;ii<3;ii++) for(int jj=0;jj<3;jj++) Cb[ii][jj]+=d[ii]*d[jj];
         }
-        float Vb[3][3];
-        jacobiEigen3(Cb, Vb);
-        Vec3 axB{Vb[0][0], Vb[1][0], Vb[2][0]};
-        float abLen = sqrtf(axB.x*axB.x + axB.y*axB.y + axB.z*axB.z);
-        if (abLen > 1e-9f) {
-            axB.x /= abLen; axB.y /= abLen; axB.z /= abLen;
-            // Accept refined axis only if aligned within 30° of crude axis
-            float dot = fabsf(axB.x*axis.x + axB.y*axis.y + axB.z*axis.z);
-            if (dot > 0.866f) {  // cos(30°)
-                axisRefined = axB;
-                cen = boreCen;
-                LOGI("Ring: bore-refined axis & centroid from %d/%zu verts", nBore, N);
+        float Vb[3][3]; jacobiEigen3(Cb,Vb);
+        Vec3 axB{Vb[0][0],Vb[1][0],Vb[2][0]};
+        float abL=sqrtf(axB.x*axB.x+axB.y*axB.y+axB.z*axB.z);
+        if(abL>1e-9f){
+            axB.x/=abL; axB.y/=abL; axB.z/=abL;
+            float dot=fabsf(axB.x*axis.x+axB.y*axis.y+axB.z*axis.z);
+            if(dot>0.766f){ // within 40° of coarse axis
+                axis=axB; cen=bCen;
             }
         }
     }
 
-    // ── Pass 4: recompute radii & percentiles with refined axis ──────────────
-    axMin = FLT_MAX; axMax = -FLT_MAX;
-    for (size_t i = 0; i < N; ++i) {
-        const auto& v = mo.vertices[i];
-        float dx = v.px-cen.x, dy = v.py-cen.y, dz = v.pz-cen.z;
-        float along = dx*axisRefined.x + dy*axisRefined.y + dz*axisRefined.z;
-        axMin = std::min(axMin, along); axMax = std::max(axMax, along);
-        float rx = dx-along*axisRefined.x, ry = dy-along*axisRefined.y, rz = dz-along*axisRefined.z;
-        radii[i] = sqrtf(rx*rx + ry*ry + rz*rz);
+    // ── Pass 5: recompute radii with refined axis ─────────────────────────────
+    axMin=FLT_MAX; axMax=-FLT_MAX;
+    for(size_t i=0;i<N;i++){
+        const auto& v=mo.vertices[i];
+        float dx=v.px-cen.x,dy=v.py-cen.y,dz=v.pz-cen.z;
+        float along=dx*axis.x+dy*axis.y+dz*axis.z;
+        axMin=std::min(axMin,along); axMax=std::max(axMax,along);
+        float rx=dx-along*axis.x,ry=dy-along*axis.y,rz=dz-along*axis.z;
+        radii[i]=sqrtf(rx*rx+ry*ry+rz*rz);
     }
-    std::copy(radii.begin(), radii.end(), sortedR.begin());
-    std::sort(sortedR.begin(), sortedR.end());
+    // Recompute percentiles
+    std::copy(radii.begin(),radii.end(),sR.begin());
+    std::sort(sR.begin(),sR.end());
+    float innerR=sR[(size_t)(N*0.03f)];
+    float outerR=sR[(size_t)(N*0.97f)];
+    if(outerR-innerR<1e-7f) return false;
 
-    // Use conservative percentiles: 3rd and 97th for cleaner inner/outer boundaries
-    float innerR = sortedR[(size_t)(N * 0.03f)];
-    float outerR = sortedR[(size_t)(N * 0.97f)];
-    if (outerR - innerR < 1e-7f) return false;
+    // ── Store results ─────────────────────────────────────────────────────────
+    m_ring.center=cen; m_ring.axis=axis;
+    m_ring.innerR=innerR; m_ring.outerR=outerR;
+    m_ring.origInnerR=innerR; m_ring.origOuterR=outerR;
+    m_ring.currentInnerR=innerR; m_ring.currentOuterR=outerR;
+    m_ring.heightAx=axMax-axMin;
+    m_ring.valid=true; m_ring.meshIdx=meshIdx;
+    m_ring.origVerts=mo.vertices;
 
-    // ── Store ─────────────────────────────────────────────────────────────────
-    m_ring.center        = cen;
-    m_ring.axis          = axisRefined;
-    m_ring.innerR        = innerR;
-    m_ring.outerR        = outerR;
-    m_ring.origInnerR    = innerR;
-    m_ring.origOuterR    = outerR;
-    m_ring.currentInnerR = innerR;
-    m_ring.currentOuterR = outerR;
-    m_ring.heightAx      = axMax - axMin;
-    m_ring.valid         = true;
-    m_ring.meshIdx       = meshIdx;
-    m_ring.origVerts     = mo.vertices;  // ← FULL backup, deformation always starts here
-
-    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
-    LOGI("Ring v3: innerR=%.3fmm outerR=%.3fmm band=%.3fmm h=%.3fmm axis=(%.3f,%.3f,%.3f) N=%zu borePts=%d",
-         innerR*toMM, outerR*toMM, (outerR-innerR)*toMM, (axMax-axMin)*toMM,
-         axisRefined.x, axisRefined.y, axisRefined.z, N, nBore);
+    float toMM=(m_normalizeScale>1e-9f)?(1.f/m_normalizeScale):1.f;
+    LOGI("Ring v3 (median): inner=%.3fmm outer=%.3fmm band=%.3fmm h=%.3fmm N=%zu borePts=%d",
+         innerR*toMM,outerR*toMM,(outerR-innerR)*toMM,(axMax-axMin)*toMM,N,nB);
     return true;
 }
 
-// ── Parameters in mm ─────────────────────────────────────────────────────────
+
 bool Renderer::getRingParams(float out[6]) const {
     if (!m_ring.valid) return false;
     float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
