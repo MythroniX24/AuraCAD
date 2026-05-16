@@ -77,7 +77,7 @@ class MainActivity : AppCompatActivity() {
     private var lblToolScale:  TextView? = null
     private var lblToolRing:   TextView? = null
 
-    internal internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING , BRUSH }
+    internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING , BRUSH }
     internal var activeTool: Tool = Tool.NONE
     private var selectedMeshIdx: Int = -1
 
@@ -275,19 +275,20 @@ class MainActivity : AppCompatActivity() {
                     toast("Long-press a mesh on the canvas to select it")
                 }
             }
-            Tool.MOVE, Tool.ROTATE, Tool.SCALE -> {
+            Tool.MOVE   -> { openMoveTool() }
+            Tool.ROTATE -> { openRotateTool() }
+            Tool.SCALE  -> {
                 if (selectedMeshIdx < 0) {
                     toast("Long-press a mesh on the canvas first, then choose a transform")
                     activeTool = Tool.NONE
                     updateToolButtons()
                 } else {
-                    findViewById<View>(R.id.btnMeshTools).performClick()
+                    openEditor()
                 }
             }
-            Tool.RING -> {
-                findViewById<View>(R.id.btnRingTool).performClick()
-            }
-            Tool.NONE -> { /* deactivated */ }
+            Tool.RING  -> { openRingTool() }
+            Tool.BRUSH -> { openBrushTool() }
+            Tool.NONE  -> { /* deactivated */ }
         }
     }
 
