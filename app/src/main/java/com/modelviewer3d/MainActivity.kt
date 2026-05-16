@@ -77,8 +77,8 @@ class MainActivity : AppCompatActivity() {
     private var lblToolScale:  TextView? = null
     private var lblToolRing:   TextView? = null
 
-    private enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING }
-    private var activeTool: Tool = Tool.NONE
+    internal internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING , BRUSH }
+    internal var activeTool: Tool = Tool.NONE
     private var selectedMeshIdx: Int = -1
 
     private var rulerPoint1: FloatArray? = null
