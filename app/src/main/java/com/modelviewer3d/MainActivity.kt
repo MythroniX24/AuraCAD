@@ -157,22 +157,9 @@ class MainActivity : AppCompatActivity() {
             findViewById<View>(R.id.btnScreenshot).setOnClickListener { takeScreenshot() }
 
             // ── Top-bar primary actions ──────────────────────────────────────
-            findViewById<View>(R.id.btnUndo).setOnClickListener {
-                glView.queueEvent { NativeLib.nativeUndo() }
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
-                }, 100)
-            }
-            findViewById<View>(R.id.btnRedo).setOnClickListener {
-                glView.queueEvent { NativeLib.nativeRedo() }
-                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
-                    sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
-                }, 100)
-            }
-            findViewById<View>(R.id.btnReset).setOnClickListener {
-                glView.queueEvent { NativeLib.nativeResetAllTransforms(); NativeLib.nativeResetCamera() }
-                sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
-            }
+            findViewById<View>(R.id.btnUndo).setOnClickListener  { glView.queueEvent { NativeLib.nativeUndo() } }
+            findViewById<View>(R.id.btnRedo).setOnClickListener  { glView.queueEvent { NativeLib.nativeRedo() } }
+            findViewById<View>(R.id.btnReset).setOnClickListener { glView.queueEvent { NativeLib.nativeResetCamera() } }
 
             // ── Top-bar overflow menu ────────────────────────────────────────
             findViewById<View>(R.id.btnOverflow).setOnClickListener { showOverflowMenu(it) }
@@ -288,10 +275,18 @@ class MainActivity : AppCompatActivity() {
                     toast("Long-press a mesh on the canvas to select it")
                 }
             }
-            Tool.MOVE   -> { openMoveTool() }
-            Tool.ROTATE -> { openRotateTool() }
-            Tool.SCALE -> { openEditor() }
-            Tool.RING   -> { openRingTool(selectedMeshIdx) }
+            Tool.MOVE, Tool.ROTATE, Tool.SCALE -> {
+                if (selectedMeshIdx < 0) {
+                    toast("Long-press a mesh on the canvas first, then choose a transform")
+                    activeTool = Tool.NONE
+                    updateToolButtons()
+                } else {
+                    findViewById<View>(R.id.btnMeshTools).performClick()
+                }
+            }
+            Tool.RING -> {
+                findViewById<View>(R.id.btnRingTool).performClick()
+            }
             Tool.NONE -> { /* deactivated */ }
         }
     }
@@ -710,6 +705,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────
+    private fun openBrushTool() {
+        if (supportFragmentManager.findFragmentByTag(BrushToolFragment.TAG) != null) return
+        BrushToolFragment.newInstance().show(supportFragmentManager, BrushToolFragment.TAG)
+    }
     private fun openMoveTool() {
         if (supportFragmentManager.findFragmentByTag(MoveToolFragment.TAG) != null) return
         MoveToolFragment.newInstance().show(supportFragmentManager, MoveToolFragment.TAG)
@@ -718,17 +717,13 @@ class MainActivity : AppCompatActivity() {
         if (supportFragmentManager.findFragmentByTag(RotateToolFragment.TAG) != null) return
         RotateToolFragment.newInstance().show(supportFragmentManager, RotateToolFragment.TAG)
     }
-    private fun openBrushTool() {
-        if (supportFragmentManager.findFragmentByTag(BrushToolFragment.TAG) != null) return
-        BrushToolFragment.newInstance().show(supportFragmentManager, BrushToolFragment.TAG)
-    }
     private fun openMeshInfo() {
         if (supportFragmentManager.findFragmentByTag(MeshInfoFragment.TAG) != null) return
         MeshInfoFragment.newInstance().show(supportFragmentManager, MeshInfoFragment.TAG)
     }
-    private fun openRingTool(meshIdx: Int = -1) {
-        (supportFragmentManager.findFragmentByTag(RingToolFragment.TAG) as? RingToolFragment)?.dismiss()
-        RingToolFragment.newInstance(meshIdx).show(supportFragmentManager, RingToolFragment.TAG)
+    private fun openRingTool() {
+        if (supportFragmentManager.findFragmentByTag(RingToolFragment.TAG) != null) return
+        RingToolFragment.newInstance().show(supportFragmentManager, RingToolFragment.TAG)
     }
     private fun openMeshTools() {
         if (supportFragmentManager.findFragmentByTag(MeshToolsFragment.TAG) != null) return

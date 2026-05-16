@@ -9,195 +9,503 @@ import android.view.*
 import android.widget.*
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
+/**
+ * Ring Deformation Tool  v3
+ *
+ * Mathematically correct resize — no texture distortion.
+ *
+ * BAND WIDTH:
+ *   r_new = origInner + (r_orig − origInner) × (newBand / origBand)
+ *   → linear wall scaling, inner bore fixed, texture fraction preserved
+ *
+ * INNER DIAMETER:
+ *   r_new = r_orig + (newInner − origInner)
+ *   → uniform radial shift, wall thickness preserved, zero texture distortion
+ *
+ * Both always start from origVerts → zero cumulative error.
+ */
 class RingToolFragment : BottomSheetDialogFragment() {
-    private var origBandWidthMM=0f; private var origInnerDiaMM=0f
-    private var bwMin=0.1f; private var bwMax=20f
-    private var idMin=1f;   private var idMax=50f
-    private val STEPS=3000
-    private var ringAnalyzed=false
-    private var targetMeshIdx=0
-    private var lastBWMM=-1f; private var lastIDMM=-1f
-    @Volatile private var suppressBW=false
-    @Volatile private var suppressID=false
 
-    private var tvStatus:TextView?=null; private var tvInfo:TextView?=null
-    private var tvBwInfo:TextView?=null; private var tvIdInfo:TextView?=null
-    private var sbBW:SeekBar?=null; private var etBW:EditText?=null
-    private var sbID:SeekBar?=null; private var etID:EditText?=null
-    private var cardBW:View?=null; private var cardID:View?=null
+    // Ring params from analysis (all in mm, normalized, from native)
+    private var origInnerRadMM  = 0f
+    private var origBandWidthMM = 0f
+    private var origInnerDiaMM  = 0f
+    private var origHeightMM    = 0f
 
-    private val broadcastDimsRunnable=Runnable{
-        activity?.sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
+    // Dynamic slider ranges (set after analysis)
+    private var bwMin = 0.1f;  private var bwMax = 20f   // band width mm
+    private var idMin = 1.0f;  private var idMax = 50f   // inner diameter mm
+    private val STEPS = 3000
+
+    private var targetMeshIdx = 0
+    private var ringAnalyzed  = false
+
+    // ── Long-press selection sync ─────────────────────────────────────────────
+    // Updated whenever the user long-presses a mesh in the viewport — keeps
+    // the Ring Tool aimed at the most recently picked mesh instead of the old
+    // hard-coded #0.  EditText below also writes to targetMeshIdx for manual
+    // override.
+    private var etMeshIdx: android.widget.EditText? = null
+    private val selectedMeshChangedReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context, i: android.content.Intent) {
+            val newIdx = i.getIntExtra("idx", -1)
+            if (newIdx >= 0) {
+                targetMeshIdx = newIdx
+                etMeshIdx?.setText(newIdx.toString())
+            }
+        }
     }
 
-    override fun onCreate(s:Bundle?){super.onCreate(s); targetMeshIdx=arguments?.getInt("meshIdx",0)?:0}
+    // UI refs
+    private var tvStatus:    TextView?  = null
+    private var tvInfo:      TextView?  = null
+    private var tvBwCurrent: TextView?  = null
+    private var tvIdCurrent: TextView?  = null
 
-    override fun onCreateView(i:LayoutInflater,c:ViewGroup?,s:Bundle?):View{
-        val ctx=requireContext()
-        val scroll=ScrollView(ctx)
-        val root=LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.bg_bottom_sheet);setPadding(0,0,0,72)}
+    private var sbBandWidth: SeekBar?   = null
+    private var etBandWidth: EditText?  = null
+    private var sbInnerDia:  SeekBar?   = null
+    private var etInnerDia:  EditText?  = null
+
+    private var cardBW: View? = null
+    private var cardID: View? = null
+
+    @Volatile private var suppressBW = false
+    @Volatile private var suppressID = false
+
+    // Debounce: don't spam GL thread on every pixel of slider drag
+    private var lastBWMM = -1f
+    private var lastIDMM = -1f
+
+    override fun onCreateView(
+        inflater: LayoutInflater, container: ViewGroup?,
+        savedInstanceState: Bundle?
+    ): View {
+        val ctx = requireContext()
+        val scroll = ScrollView(ctx).apply { setBackgroundColor(0x00000000) }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 80)
+            setBackgroundResource(R.drawable.bg_bottom_sheet)
+        }
         scroll.addView(root)
 
-        root.addView(handle(ctx))
-        root.addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(20,14,20,6)
-            addView(TextView(ctx).apply{text="💍  Ring Tool";textSize=16f;setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(Color.WHITE)
-                layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)})
-            addView(TextView(ctx).apply{text="v3";textSize=9f;setTextColor(Color.parseColor("#00D4FF"))
-                background=ctx.getDrawable(R.drawable.bg_pill);setPadding(10,3,10,3)})})
-        root.addView(hdiv(ctx))
+        // Handle bar
+        root.addView(LinearLayout(ctx).apply {
+            gravity = android.view.Gravity.CENTER_HORIZONTAL; setPadding(0, 14, 0, 0)
+            addView(View(ctx).apply {
+                setBackgroundColor(Color.parseColor("#404058"))
+                layoutParams = LinearLayout.LayoutParams(48, 4)
+            })
+        })
 
-        root.addView(sec(ctx,"RING DETECTION"))
-        root.addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(20,8,20,0)
-            addView(TextView(ctx).apply{text="Mesh:";textSize=11f;setTextColor(Color.parseColor("#9090B0"));setPadding(0,0,10,0)})
-            addView(EditText(ctx).apply{inputType=InputType.TYPE_CLASS_NUMBER;setText("$targetMeshIdx")
-                setTextColor(Color.WHITE);textSize=13f;background=ctx.getDrawable(R.drawable.bg_input_field);setPadding(10,6,10,6)
-                layoutParams=LinearLayout.LayoutParams(80,LinearLayout.LayoutParams.WRAP_CONTENT)
-                addTextChangedListener(object:TextWatcher{override fun beforeTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){}
-                    override fun onTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){}
-                    override fun afterTextChanged(s:Editable?){targetMeshIdx=s?.toString()?.toIntOrNull()?:0}})})
-            addView(TextView(ctx).apply{text="  (auto-uses selected mesh)";textSize=9f;setTextColor(Color.parseColor("#404060"))})})
+        // Title row
+        root.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(20, 14, 20, 6)
+            addView(TextView(ctx).apply {
+                text = "💍  Ring Tool"; textSize = 16f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(Color.WHITE)
+                layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            })
+            addView(TextView(ctx).apply {
+                text = "v3"; textSize = 9f; letterSpacing = 0.12f
+                setTextColor(Color.parseColor("#00D4FF"))
+                background = ctx.getDrawable(R.drawable.bg_pill); setPadding(10, 3, 10, 3)
+            })
+        })
+        root.addView(divider(ctx))
 
-        val btnDetect=Button(ctx).apply{text="▶  Detect Ring Geometry";textSize=12f;setTextColor(Color.parseColor("#050508"))
-            setTypeface(null,android.graphics.Typeface.BOLD);background=ctx.getDrawable(R.drawable.bg_btn_accent)
-            layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,52).apply{setMargins(20,12,20,0)}}
+        // ── Detection panel ───────────────────────────────────────────────────
+        root.addView(sectionLabel(ctx, "RING DETECTION"))
+        root.addView(infoCard(ctx,
+            "How to use: Open a ring STL/OBJ → tap Detect → " +
+            "adjust Band Width (wall thickness) or Inner Diameter (ring size). " +
+            "Texture is fully preserved during resize."))
+
+        // Mesh index row
+        root.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(20, 10, 20, 0)
+            addView(TextView(ctx).apply {
+                text = "Mesh index:"; textSize = 11f
+                setTextColor(Color.parseColor("#9090B0")); setPadding(0,0,12,0)
+            })
+            val etIdx = EditText(ctx).apply {
+                inputType = InputType.TYPE_CLASS_NUMBER
+                // Pre-fill with current selection so long-press → open Ring
+                // Tool "just works" without typing the index.
+                setText(targetMeshIdx.toString())
+                setTextColor(Color.WHITE); textSize = 13f
+                background = ctx.getDrawable(R.drawable.bg_input_field); setPadding(10,8,10,8)
+                layoutParams = LinearLayout.LayoutParams(80, LinearLayout.LayoutParams.WRAP_CONTENT)
+                addTextChangedListener(simpleWatcher { targetMeshIdx = text.toString().toIntOrNull() ?: 0 })
+            }
+            etMeshIdx = etIdx
+            addView(etIdx)
+            addView(TextView(ctx).apply {
+                text = "  (0 = whole model)"; textSize = 9f
+                setTextColor(Color.parseColor("#404060"))
+            })
+        })
+
+        // Detect button
+        val btnDetect = Button(ctx).apply {
+            text = "▶  Detect Ring Geometry"
+            textSize = 12f; setTextColor(Color.parseColor("#050508"))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            background = ctx.getDrawable(R.drawable.bg_btn_accent)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, 52
+            ).apply { setMargins(20,12,20,0) }
+        }
         root.addView(btnDetect)
 
-        tvStatus=TextView(ctx).apply{text="⚠  No ring detected yet";textSize=10f;setTextColor(Color.parseColor("#FF7043"));setPadding(20,10,20,2)}
+        // Status
+        tvStatus = TextView(ctx).apply {
+            text = "⚠  No ring detected yet"; textSize = 10f
+            setTextColor(Color.parseColor("#FF7043")); setPadding(20,10,20,2)
+        }
         root.addView(tvStatus)
-        tvInfo=TextView(ctx).apply{text="";textSize=10f;setTextColor(Color.parseColor("#606080"));setPadding(20,0,20,6)}
+        tvInfo = TextView(ctx).apply {
+            text = ""; textSize = 10f
+            setTextColor(Color.parseColor("#606080")); setPadding(20,0,20,6)
+        }
         root.addView(tvInfo)
-        root.addView(hdiv(ctx))
+        root.addView(divider(ctx))
 
-        val bwCard=buildSliderCard(ctx,"BAND WIDTH","Outer wall expands · Inner bore fixed","#00D4FF",
-            onSb={sb->sbBW=sb}, onEt={et->etBW=et}, onInfo={tv->tvBwInfo=tv}){v->
-            if(ringAnalyzed&&v!=lastBWMM){lastBWMM=v
-                glRun{NativeLib.nativeSetRingBandWidth(v)}; glReq()
-                activity?.runOnUiThread{tvBwInfo?.text="Band: %.2fmm  →  outer ⌀ %.2fmm".format(v,(origInnerDiaMM/2f+v)*2f)
-                    activity?.sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))}}
+        // ── Band Width card ───────────────────────────────────────────────────
+        val bwCard = buildSliderCard(ctx, root,
+            header    = "BAND WIDTH  (Wall Thickness)",
+            desc      = "Outer wall expands/contracts · Inner bore stays fixed",
+            unit      = "mm",
+            accentHex = "#00D4FF",
+            onSbInit  = { sb -> sbBandWidth = sb },
+            onEtInit  = { et -> etBandWidth = et },
+            onInfoInit= { tv -> tvBwCurrent = tv },
+            onChange  = { v ->
+                if (ringAnalyzed && v != lastBWMM) {
+                    lastBWMM = v
+                    glRun { NativeLib.nativeSetRingBandWidth(v) }
+                    activity?.runOnUiThread {
+                        updateBwInfo(v)
+                        // Notify EditorPanel to refresh its dimension display
+                        activity?.sendBroadcast(
+                            android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
+                    }
+                }
+            }
+        )
+        cardBW = bwCard; bwCard.visibility = View.GONE; root.addView(bwCard)
+        root.addView(spacer(ctx, 6))
+
+        // ── Inner Diameter card ───────────────────────────────────────────────
+        val idCard = buildSliderCard(ctx, root,
+            header    = "INNER DIAMETER  (Ring Size)",
+            desc      = "Hole expands/contracts · Wall thickness stays the same",
+            unit      = "mm",
+            accentHex = "#FF9800",
+            onSbInit  = { sb -> sbInnerDia = sb },
+            onEtInit  = { et -> etInnerDia = et },
+            onInfoInit= { tv -> tvIdCurrent = tv },
+            onChange  = { v ->
+                if (ringAnalyzed && v != lastIDMM) {
+                    lastIDMM = v
+                    glRun { NativeLib.nativeSetRingInnerDiameter(v) }
+                    activity?.runOnUiThread {
+                        updateIdInfo(v)
+                        activity?.sendBroadcast(
+                            android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
+                    }
+                }
+            }
+        )
+        cardID = idCard; idCard.visibility = View.GONE; root.addView(idCard)
+        root.addView(divider(ctx))
+
+        // ── Action row ────────────────────────────────────────────────────────
+        root.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL; setPadding(20,12,20,0)
+            addView(Button(ctx).apply {
+                text = "↺ Reset"; textSize = 11f
+                setTextColor(Color.parseColor("#FF7043"))
+                background = ctx.getDrawable(R.drawable.bg_btn_danger); setPadding(20,0,20,0)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, 44).apply { setMargins(0,0,12,0) }
+                setOnClickListener {
+                    glRun {
+                        NativeLib.nativeResetRingDeformation()
+                        val p = NativeLib.nativeGetRingParams()
+                        activity?.runOnUiThread { if (p.size >= 6) applyRingParams(p, resetSliders = true) }
+                    }
+                }
+            })
+            addView(Button(ctx).apply {
+                text = "Re-Detect"; textSize = 11f
+                setTextColor(Color.parseColor("#9090B0"))
+                background = ctx.getDrawable(R.drawable.bg_card_dark); setPadding(20,0,20,0)
+                layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 44)
+                setOnClickListener { btnDetect.performClick() }
+            })
+        })
+
+        // ── Wire detect button ────────────────────────────────────────────────
+        btnDetect.setOnClickListener {
+            ringAnalyzed = false
+            cardBW?.visibility = View.GONE
+            cardID?.visibility = View.GONE
+            tvStatus?.text = "⏳  Detecting ring…"; tvStatus?.setTextColor(Color.parseColor("#FFD54F"))
+            tvInfo?.text = ""
+
+            glRun {
+                val ok = NativeLib.nativeAnalyzeRing(targetMeshIdx)
+                if (ok) {
+                    val p = NativeLib.nativeGetRingParams()
+                    activity?.runOnUiThread {
+                        if (p.size >= 6) applyRingParams(p, resetSliders = true)
+                        else { tvStatus?.text = "✗ Param read failed"; tvStatus?.setTextColor(Color.parseColor("#FF5252")) }
+                    }
+                } else {
+                    activity?.runOnUiThread {
+                        tvStatus?.text = "✗ Mesh #$targetMeshIdx is not a ring shape"
+                        tvStatus?.setTextColor(Color.parseColor("#FF5252"))
+                    }
+                }
+            }
         }
-        cardBW=bwCard; bwCard.visibility=View.GONE; root.addView(bwCard)
-        root.addView(View(ctx).apply{layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,6)})
 
-        val idCard=buildSliderCard(ctx,"INNER DIAMETER","Inner bore changes · Band width stays","#FF9800",
-            onSb={sb->sbID=sb}, onEt={et->etID=et}, onInfo={tv->tvIdInfo=tv}){v->
-            if(ringAnalyzed&&v!=lastIDMM){lastIDMM=v
-                glRun{NativeLib.nativeSetRingInnerDiameter(v)}; glReq()
-                activity?.runOnUiThread{tvIdInfo?.text="Inner ⌀: %.2fmm  →  US ~%.1f".format(v,diamToUS(v))
-                    activity?.sendBroadcast(android.content.Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))}}
-        }
-        cardID=idCard; idCard.visibility=View.GONE; root.addView(idCard)
-        root.addView(hdiv(ctx))
-
-        root.addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;setPadding(20,12,20,0)
-            addView(Button(ctx).apply{text="↺ Reset";textSize=11f;setTextColor(Color.parseColor("#FF7043"))
-                background=ctx.getDrawable(R.drawable.bg_btn_danger);setPadding(20,0,20,0)
-                layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,44).apply{setMargins(0,0,12,0)}
-                setOnClickListener{glRun{NativeLib.nativeResetRingDeformation()
-                    val p=NativeLib.nativeGetRingParams()
-                    activity?.runOnUiThread{if(p.size>=6)applyParams(p)}}}})
-            addView(Button(ctx).apply{text="Re-Detect";textSize=11f;setTextColor(Color.parseColor("#9090B0"))
-                background=ctx.getDrawable(R.drawable.bg_card_dark);setPadding(20,0,20,0)
-                layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,44)
-                setOnClickListener{btnDetect.performClick()}})})
-
-        btnDetect.setOnClickListener{
-            ringAnalyzed=false; cardBW?.visibility=View.GONE; cardID?.visibility=View.GONE
-            val idx=if(targetMeshIdx<0) 0 else targetMeshIdx
-            tvStatus?.text="⏳  Detecting on mesh #$idx…"; tvStatus?.setTextColor(Color.parseColor("#FFD54F")); tvInfo?.text=""
-            glRun{val ok=NativeLib.nativeAnalyzeRing(idx)
-                if(ok){val p=NativeLib.nativeGetRingParams()
-                    activity?.runOnUiThread{if(p.size>=6)applyParams(p)
-                    else{tvStatus?.text="✗ Param error";tvStatus?.setTextColor(Color.parseColor("#FF5252"))}}}
-                else activity?.runOnUiThread{tvStatus?.text="✗ Mesh #$idx not a ring shape"
-                    tvStatus?.setTextColor(Color.parseColor("#FF5252"))}}
-        }
         return scroll
     }
 
-    private fun applyParams(p:FloatArray){
-        origBandWidthMM=p[2]; origInnerDiaMM=p[3]; lastBWMM=p[2]; lastIDMM=p[3]
-        bwMin=(p[2]*0.1f).coerceAtLeast(0.05f); bwMax=(p[2]*3.5f).coerceAtMost(50f)
-        idMin=(p[3]*0.5f).coerceAtLeast(0.5f);   idMax=(p[3]*2.0f).coerceAtMost(80f)
-        ringAnalyzed=true
-        tvStatus?.text="✓ Ring detected"; tvStatus?.setTextColor(Color.parseColor("#4CAF82"))
-        tvInfo?.text="Inner ⌀ %.2fmm  ·  Outer ⌀ %.2fmm  ·  Band %.2fmm  ·  H %.2fmm".format(p[3],p[4],p[2],p[5])
-        setSlider(sbBW,etBW,p[2],bwMin,bwMax,"BW")
-        tvBwInfo?.text="Band: %.2fmm  →  outer ⌀ %.2fmm".format(p[2],p[4])
-        cardBW?.visibility=View.VISIBLE
-        setSlider(sbID,etID,p[3],idMin,idMax,"ID")
-        tvIdInfo?.text="Inner ⌀: %.2fmm  →  US ~%.1f".format(p[3],diamToUS(p[3]))
-        cardID?.visibility=View.VISIBLE
+    // ── Apply detected ring parameters to all UI ──────────────────────────────
+    private fun applyRingParams(p: FloatArray, resetSliders: Boolean) {
+        // p: [innerRadMM, outerRadMM, bandWidthMM, innerDiaMM, outerDiaMM, heightMM]
+        origInnerRadMM  = p[0]
+        origBandWidthMM = p[2]
+        origInnerDiaMM  = p[3]
+        origHeightMM    = p[5]
+
+        // Dynamic ranges: 10%–350% of original band, 50%–200% of original inner dia
+        bwMin = (origBandWidthMM * 0.1f).coerceAtLeast(0.05f)
+        bwMax = (origBandWidthMM * 3.5f).coerceAtMost(50f)
+        idMin = (origInnerDiaMM  * 0.5f).coerceAtLeast(0.5f)
+        idMax = (origInnerDiaMM  * 2.0f).coerceAtMost(80f)
+
+        lastBWMM = origBandWidthMM
+        lastIDMM = origInnerDiaMM
+        ringAnalyzed = true
+
+        tvStatus?.text = "✓ Ring detected"
+        tvStatus?.setTextColor(Color.parseColor("#4CAF82"))
+        tvInfo?.text = "Inner ⌀ %.2f mm  •  Outer ⌀ %.2f mm  •  Band %.2f mm  •  H %.2f mm  •  US ~%.1f"
+            .format(origInnerDiaMM, p[4], origBandWidthMM, origHeightMM,
+                    diamToUSSize(origInnerDiaMM))
+
+        if (resetSliders) {
+            setSliderTo(sbBandWidth, etBandWidth, origBandWidthMM, bwMin, bwMax, "BW")
+            setSliderTo(sbInnerDia,  etInnerDia,  origInnerDiaMM,  idMin, idMax, "ID")
+        }
+        updateBwInfo(origBandWidthMM)
+        updateIdInfo(origInnerDiaMM)
+
+        cardBW?.visibility = View.VISIBLE
+        cardID?.visibility = View.VISIBLE
     }
 
-    private fun setSlider(sb:SeekBar?,et:EditText?,v:Float,min:Float,max:Float,tok:String){
-        val p=((v-min)/(max-min)*STEPS).toInt().coerceIn(0,STEPS)
-        val t="%.2f".format(v)
-        when(tok){"BW"->{suppressBW=true;sb?.progress=p;et?.setText(t);suppressBW=false}
-                   "ID"->{suppressID=true;sb?.progress=p;et?.setText(t);suppressID=false}}
+    private fun updateBwInfo(bwMM: Float) {
+        val newOuterDia = (origInnerDiaMM + bwMM * 2f)
+        tvBwCurrent?.text = "Band: %.2f mm  →  Outer ⌀ %.2f mm".format(bwMM, newOuterDia)
     }
 
-    private fun buildSliderCard(ctx:android.content.Context,title:String,sub:String,hex:String,
-        onSb:(SeekBar)->Unit,onEt:(EditText)->Unit,onInfo:(TextView)->Unit,onChange:(Float)->Unit):LinearLayout{
-        val accent=Color.parseColor(hex)
-        val card=LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.bg_card_dark);setPadding(0,0,0,16)
-            layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT).apply{setMargins(14,4,14,0)}}
-        card.addView(TextView(ctx).apply{text=title;textSize=9f;letterSpacing=0.14f;setTextColor(Color.parseColor(hex));setPadding(16,14,16,0)})
-        card.addView(TextView(ctx).apply{text=sub;textSize=9f;setTextColor(Color.parseColor("#505070"));setPadding(16,3,16,8)})
-        val row=LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(16,0,16,0)}
-        val et=EditText(ctx).apply{inputType=InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-            setText("0.00");setTextColor(Color.WHITE);textSize=18f;setTypeface(null,android.graphics.Typeface.BOLD)
-            background=ctx.getDrawable(R.drawable.bg_input_field);setPadding(14,10,14,10)
-            layoutParams=LinearLayout.LayoutParams(150,LinearLayout.LayoutParams.WRAP_CONTENT)}
-        onEt(et); row.addView(et)
-        row.addView(TextView(ctx).apply{text=" mm";textSize=12f;setTextColor(Color.parseColor("#505070"))})
-        card.addView(row)
-        val sb=SeekBar(ctx).apply{setMax(STEPS);progress=0
-            progressTintList=android.content.res.ColorStateList.valueOf(accent)
-            thumbTintList=android.content.res.ColorStateList.valueOf(accent);setPadding(16,8,16,0)}
-        onSb(sb); card.addView(sb)
-        val tvI=TextView(ctx).apply{text="";textSize=10f;setTextColor(Color.parseColor("#606080"));setPadding(16,6,16,0)}
-        onInfo(tvI); card.addView(tvI)
+    private fun updateIdInfo(idMM: Float) {
+        tvIdCurrent?.text = "Inner ⌀: %.2f mm  →  US ring size ~%.1f".format(idMM, diamToUSSize(idMM))
+    }
 
-        val isBW=hex=="#00D4FF"
-        sb.setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{
-            override fun onStartTrackingTouch(b:SeekBar){}; override fun onStopTrackingTouch(b:SeekBar){}
-            override fun onProgressChanged(b:SeekBar,p:Int,fromUser:Boolean){
-                if(!fromUser||!ringAnalyzed) return
-                val min=if(isBW)bwMin else idMin; val max=if(isBW)bwMax else idMax
-                val v=min+p.toFloat()/STEPS*(max-min); val t="%.2f".format(v)
-                if(isBW){if(!suppressBW){suppressBW=true;et.setText(t);suppressBW=false}}
-                else{if(!suppressID){suppressID=true;et.setText(t);suppressID=false}}
-                onChange(v)}})
-        et.addTextChangedListener(object:TextWatcher{
-            override fun beforeTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){}
-            override fun onTextChanged(s:CharSequence?,a:Int,b:Int,c:Int){}
-            override fun afterTextChanged(s:Editable?){
-                if(!ringAnalyzed) return
-                if(isBW&&suppressBW) return; if(!isBW&&suppressID) return
-                val v=et.text.toString().toFloatOrNull()?:return
-                val min=if(isBW)bwMin else idMin; val max=if(isBW)bwMax else idMax
-                if(v<min*0.5f||v>max*2f) return
-                val p=((v.coerceIn(min,max)-min)/(max-min)*STEPS).toInt().coerceIn(0,STEPS)
-                if(isBW){suppressBW=true;sb.progress=p;suppressBW=false}
-                else{suppressID=true;sb.progress=p;suppressID=false}
-                onChange(v.coerceIn(min,max))}})
+    /** US ring size from inner circumference: size = (circ_mm − 36.5) / 2.55 */
+    private fun diamToUSSize(diamMM: Float): Float {
+        val circ = diamMM * Math.PI.toFloat()
+        return ((circ - 36.5f) / 2.55f).coerceAtLeast(0f)
+    }
+
+    // ── Set slider + EditText to a specific mm value ──────────────────────────
+    private fun setSliderTo(sb: SeekBar?, et: EditText?, value: Float, min: Float, max: Float, token: String) {
+        val prog = valueToProgress(value, min, max)
+        val txt  = "%.2f".format(value)
+        when (token) {
+            "BW" -> { suppressBW = true; sb?.progress = prog; et?.setText(txt); suppressBW = false }
+            "ID" -> { suppressID = true; sb?.progress = prog; et?.setText(txt); suppressID = false }
+        }
+    }
+
+    private fun valueToProgress(v: Float, min: Float, max: Float) =
+        ((v - min) / (max - min) * STEPS).toInt().coerceIn(0, STEPS)
+    private fun progressToValue(p: Int, min: Float, max: Float) =
+        min + p.toFloat() / STEPS * (max - min)
+
+    // ── Build a slider control card ───────────────────────────────────────────
+    private fun buildSliderCard(
+        ctx: android.content.Context,
+        @Suppress("UNUSED_PARAMETER") root: LinearLayout,
+        header: String, desc: String, unit: String, accentHex: String,
+        onSbInit:   (SeekBar) -> Unit,
+        onEtInit:   (EditText) -> Unit,
+        onInfoInit: (TextView) -> Unit,
+        onChange:   (Float) -> Unit
+    ): LinearLayout {
+        val accent = Color.parseColor(accentHex)
+
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.bg_card_dark)
+            setPadding(0, 0, 0, 18)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(14, 4, 14, 0) }
+        }
+
+        card.addView(TextView(ctx).apply {
+            text = header; textSize = 9f; letterSpacing = 0.14f
+            setTextColor(Color.parseColor(accentHex)); setPadding(16, 14, 16, 0)
+        })
+        card.addView(TextView(ctx).apply {
+            text = desc; textSize = 9f; setTextColor(Color.parseColor("#505070"))
+            setPadding(16, 3, 16, 8)
+        })
+
+        // EditText + unit in a row
+        val inputRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(16, 0, 16, 0)
+        }
+        val et = EditText(ctx).apply {
+            inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
+            setText("0.00"); setTextColor(Color.WHITE); textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            background = ctx.getDrawable(R.drawable.bg_input_field); setPadding(14, 10, 14, 10)
+            layoutParams = LinearLayout.LayoutParams(150, LinearLayout.LayoutParams.WRAP_CONTENT)
+        }
+        onEtInit(et); inputRow.addView(et)
+        inputRow.addView(TextView(ctx).apply {
+            text = " $unit"; textSize = 12f; setTextColor(Color.parseColor("#505070"))
+        })
+        card.addView(inputRow)
+
+        // SeekBar
+        val sb = SeekBar(ctx).apply {
+            max = STEPS; progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(accent)
+            thumbTintList    = android.content.res.ColorStateList.valueOf(accent)
+            setPadding(16, 8, 16, 0)
+        }
+        onSbInit(sb); card.addView(sb)
+
+        // Live info label
+        val tvInfo = TextView(ctx).apply {
+            text = ""; textSize = 10f
+            setTextColor(Color.parseColor("#606080")); setPadding(16, 6, 16, 0)
+        }
+        onInfoInit(tvInfo); card.addView(tvInfo)
+
+        // ── Wire SeekBar ──────────────────────────────────────────────────────
+        val isOuter = accentHex == "#00D4FF"
+        sb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onStartTrackingTouch(b: SeekBar) {}
+            override fun onStopTrackingTouch(b: SeekBar) {}
+            override fun onProgressChanged(b: SeekBar, p: Int, fromUser: Boolean) {
+                if (!fromUser || !ringAnalyzed) return
+                val min = if (isOuter) bwMin else idMin
+                val max = if (isOuter) bwMax else idMax
+                val v = progressToValue(p, min, max)
+                val txt = "%.2f".format(v)
+                if (isOuter) { if (!suppressBW) { suppressBW=true; et.setText(txt); suppressBW=false } }
+                else          { if (!suppressID) { suppressID=true; et.setText(txt); suppressID=false } }
+                onChange(v)
+            }
+        })
+
+        // ── Wire EditText ─────────────────────────────────────────────────────
+        et.addTextChangedListener(simpleWatcher {
+            if (!ringAnalyzed) return@simpleWatcher
+            if (isOuter && suppressBW) return@simpleWatcher
+            if (!isOuter && suppressID) return@simpleWatcher
+            val v = et.text.toString().toFloatOrNull() ?: return@simpleWatcher
+            val min = if (isOuter) bwMin else idMin
+            val max = if (isOuter) bwMax else idMax
+            if (v < min * 0.5f || v > max * 2f) return@simpleWatcher  // ignore out-of-range
+            val prog = valueToProgress(v.coerceIn(min, max), min, max)
+            if (isOuter) { suppressBW=true; sb.progress=prog; suppressBW=false }
+            else          { suppressID=true; sb.progress=prog; suppressID=false }
+            onChange(v.coerceIn(min, max))
+        })
+
         return card
     }
 
-    private fun diamToUS(d:Float)=((d*Math.PI.toFloat()-36.5f)/2.55f).coerceAtLeast(0f)
-    private fun handle(ctx:android.content.Context)=LinearLayout(ctx).apply{gravity=android.view.Gravity.CENTER_HORIZONTAL;setPadding(0,14,0,0)
-        addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#404058"));layoutParams=LinearLayout.LayoutParams(48,4)})}
-    private fun sec(ctx:android.content.Context,t:String)=TextView(ctx).apply{text=t;textSize=9f;letterSpacing=0.14f;setTextColor(Color.parseColor("#00D4FF"));setPadding(20,18,20,6)}
-    private fun hdiv(ctx:android.content.Context)=View(ctx).apply{setBackgroundColor(Color.parseColor("#1A1A28"));layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,1)}
-    private fun glRun(block:()->Unit)=(activity as? MainActivity)?.glView?.queueEvent(block)
-    private fun glReq()=(activity as? MainActivity)?.glView?.requestRender()
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    private fun simpleWatcher(action: () -> Unit) = object : TextWatcher {
+        override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        override fun onTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
+        override fun afterTextChanged(s: Editable?) { action() }
+    }
 
-    override fun onDestroyView(){view?.removeCallbacks(broadcastDimsRunnable);super.onDestroyView()}
+    private fun infoCard(ctx: android.content.Context, msg: String) = TextView(ctx).apply {
+        text = msg; textSize = 10f; setTextColor(Color.parseColor("#505070"))
+        background = ctx.getDrawable(R.drawable.bg_hint_card)
+        setPadding(16, 12, 16, 12)
+        layoutParams = LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        ).apply { setMargins(14, 4, 14, 0) }
+    }
 
-    companion object{
-        const val TAG="RingTool"
-        fun newInstance(meshIdx:Int=-1)=RingToolFragment().apply{if(meshIdx>=0)arguments=android.os.Bundle().apply{putInt("meshIdx",meshIdx)}}
+    private fun sectionLabel(ctx: android.content.Context, text: String) = TextView(ctx).apply {
+        this.text = text; textSize = 9f; letterSpacing = 0.14f
+        setTextColor(Color.parseColor("#00D4FF")); setPadding(20, 18, 20, 6)
+    }
+
+    private fun divider(ctx: android.content.Context) = View(ctx).apply {
+        setBackgroundColor(Color.parseColor("#1A1A28"))
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+    }
+
+    private fun spacer(ctx: android.content.Context, dp: Int) = View(ctx).apply {
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp)
+    }
+
+    private fun glRun(block: () -> Unit) =
+        (activity as? MainActivity)?.glView?.queueEvent(block)
+
+    // ── Lifecycle: pre-fill target from native selection and listen for changes
+    override fun onStart() {
+        super.onStart()
+        val ctx = requireContext()
+        val filter = android.content.IntentFilter(MainActivity.ACTION_SELECTED_MESH_CHANGED)
+        if (android.os.Build.VERSION.SDK_INT >= 33) {
+            ctx.registerReceiver(selectedMeshChangedReceiver, filter,
+                android.content.Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            ctx.registerReceiver(selectedMeshChangedReceiver, filter)
+        }
+        // Pull whatever's currently selected at open time
+        (activity as? MainActivity)?.glView?.queueEvent {
+            val idx = try { NativeLib.nativeGetSelectedMesh() } catch (_: Exception) { -1 }
+            if (idx >= 0) activity?.runOnUiThread {
+                targetMeshIdx = idx
+                etMeshIdx?.setText(idx.toString())
+            }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        try { requireContext().unregisterReceiver(selectedMeshChangedReceiver) } catch (_: Exception) {}
+    }
+
+    companion object {
+        const val TAG = "RingTool"
+        fun newInstance() = RingToolFragment()
     }
 }

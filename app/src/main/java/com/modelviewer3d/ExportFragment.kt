@@ -1,78 +1,253 @@
 package com.modelviewer3d
 
+import android.content.Intent
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
 import android.view.*
 import android.widget.*
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 
+/**
+ * Export & Share bottom sheet.
+ * Formats: OBJ, STL
+ * Actions: Save to device, Share (system chooser), Direct app (WhatsApp, Telegram, Email, Drive)
+ */
 class ExportFragment : BottomSheetDialogFragment() {
-    private var selectedFormat="obj"
-    private data class Fmt(val id:String,val lbl:String,val desc:String,val color:String)
-    private val formats=listOf(Fmt("obj","OBJ","Wavefront · Text · Universal","#00D4FF"),Fmt("stl","STL","Binary · 3D Printing","#FF9800"),Fmt("ply","PLY","Stanford · MeshLab compatible","#4CAF82"))
-    private var fmtBtns=mutableListOf<Pair<LinearLayout,Fmt>>()
 
-    override fun onCreateView(i:LayoutInflater,c:ViewGroup?,s:Bundle?):View{
-        val ctx=requireContext(); val scroll=ScrollView(ctx)
-        val root=LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL;setBackgroundResource(R.drawable.bg_bottom_sheet);setPadding(0,0,0,56)}
-        scroll.addView(root)
-        root.addView(LinearLayout(ctx).apply{gravity=android.view.Gravity.CENTER_HORIZONTAL;setPadding(0,14,0,0)
-            addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#404058"));layoutParams=LinearLayout.LayoutParams(48,4)})})
-        root.addView(TextView(ctx).apply{text="↑  Export & Share";textSize=17f;setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(Color.WHITE);setPadding(20,14,20,4)})
-        root.addView(TextView(ctx).apply{text="Select format, then save or share";textSize=11f;setTextColor(Color.parseColor("#606080"));setPadding(20,0,20,10)})
-        root.addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#1A1A28"));layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,1)})
+    private var selectedFormat = "obj"
 
-        root.addView(TextView(ctx).apply{text="FORMAT";textSize=9f;letterSpacing=0.14f;setTextColor(Color.parseColor("#00D4FF"));setPadding(20,14,20,6)})
-        val fmtRow=LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;setPadding(14,6,14,14)}
-        for(fmt in formats){
-            val btn=LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL;gravity=android.view.Gravity.CENTER
-                background=ctx.getDrawable(if(fmt.id==selectedFormat) R.drawable.bg_card_selected else R.drawable.bg_card_dark)
-                setPadding(10,14,10,14);isClickable=true;isFocusable=true
-                layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f).apply{setMargins(4,0,4,0)}
-                addView(TextView(ctx).apply{text=fmt.lbl;textSize=15f;setTypeface(null,android.graphics.Typeface.BOLD)
-                    setTextColor(if(fmt.id==selectedFormat) Color.parseColor(fmt.color) else Color.WHITE);gravity=android.view.Gravity.CENTER})
-                addView(TextView(ctx).apply{text=fmt.desc;textSize=8f;setTextColor(Color.parseColor("#505070"));gravity=android.view.Gravity.CENTER;setPadding(0,4,0,0)})
-                setOnClickListener{selectedFormat=fmt.id;refreshBtns()}}
-            fmtBtns.add(Pair(btn,fmt)); fmtRow.addView(btn)
+    override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
+        val ctx = requireContext()
+        val scroll = ScrollView(ctx).apply { setBackgroundColor(0x00000000) }
+        val root = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 0, 0, 48)
+            setBackgroundResource(R.drawable.bg_bottom_sheet)
         }
+        scroll.addView(root)
+
+        // ── Handle ───────────────────────────────────────────────────────────
+        root.addView(LinearLayout(ctx).apply {
+            gravity = android.view.Gravity.CENTER_HORIZONTAL
+            setPadding(0, 14, 0, 0)
+            addView(View(ctx).apply {
+                setBackgroundColor(Color.parseColor("#404058"))
+                layoutParams = LinearLayout.LayoutParams(48, 4)
+            })
+        })
+
+        // ── Title ────────────────────────────────────────────────────────────
+        root.addView(TextView(ctx).apply {
+            text = "↑  Export & Share"
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            setPadding(20, 14, 20, 4)
+        })
+        root.addView(TextView(ctx).apply {
+            text = "Choose format and destination"
+            textSize = 11f
+            setTextColor(Color.parseColor("#606080"))
+            setPadding(20, 0, 20, 12)
+        })
+
+        root.addView(divider(ctx))
+
+        // ── Format selector ──────────────────────────────────────────────────
+        root.addView(sectionLabel(ctx, "FORMAT"))
+        val fmtRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(16, 8, 16, 12)
+        }
+
+        val btnObj = makeFormatBtn(ctx, "OBJ", "Wavefront OBJ\nText format · Universal", "#00D4FF", true)
+        val btnStl = makeFormatBtn(ctx, "STL", "Stereolithography\nBinary · 3D Printing", "#9090B0", false)
+
+        btnObj.setOnClickListener {
+            selectedFormat = "obj"
+            tintFormatBtn(btnObj, "#00D4FF", true)
+            tintFormatBtn(btnStl, "#9090B0", false)
+        }
+        btnStl.setOnClickListener {
+            selectedFormat = "stl"
+            tintFormatBtn(btnStl, "#00D4FF", true)
+            tintFormatBtn(btnObj, "#9090B0", false)
+        }
+
+        fmtRow.addView(btnObj)
+        fmtRow.addView(View(ctx).apply { layoutParams = LinearLayout.LayoutParams(10, 1) })
+        fmtRow.addView(btnStl)
         root.addView(fmtRow)
-        root.addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#1A1A28"));layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,1)})
 
-        root.addView(TextView(ctx).apply{text="SAVE TO DEVICE";textSize=9f;letterSpacing=0.14f;setTextColor(Color.parseColor("#00D4FF"));setPadding(20,14,20,6)})
-        root.addView(actionRow(ctx,"💾","Save to Downloads","Downloads/3DViewer/","#00D4FF"){(activity as? MainActivity)?.exportModel(selectedFormat,share=false);dismiss()})
-        root.addView(View(ctx).apply{layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,8)})
-        root.addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#1A1A28"));layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,1)})
+        root.addView(divider(ctx))
 
-        root.addView(TextView(ctx).apply{text="SHARE VIA";textSize=9f;letterSpacing=0.14f;setTextColor(Color.parseColor("#00D4FF"));setPadding(20,14,20,6)})
-        root.addView(actionRow(ctx,"↗","Share via Any App","System chooser","#9090B0"){(activity as? MainActivity)?.exportModel(selectedFormat,share=true);dismiss()})
-        root.addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;setPadding(14,8,14,0)
-            for((emoji,label,pkg) in listOf(Triple("💬","WhatsApp","com.whatsapp"),Triple("✈️","Telegram","org.telegram.messenger"),Triple("📧","Email",null))){
-                addView(LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL;gravity=android.view.Gravity.CENTER
-                    background=ctx.getDrawable(R.drawable.bg_card_dark);isClickable=true;isFocusable=true
-                    layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f).apply{setMargins(4,0,4,0)}
-                    setPadding(0,10,0,10)
-                    addView(TextView(ctx).apply{text=emoji;textSize=20f;gravity=android.view.Gravity.CENTER})
-                    addView(TextView(ctx).apply{text=label;textSize=9f;setTextColor(Color.parseColor("#606080"));gravity=android.view.Gravity.CENTER})
-                    setOnClickListener{(activity as? MainActivity)?.exportModel(selectedFormat,share=true,shareApp=pkg);dismiss()}})}})
+        // ── Save to Device ───────────────────────────────────────────────────
+        root.addView(sectionLabel(ctx, "SAVE TO DEVICE"))
+        root.addView(makeBigActionBtn(ctx, "💾", "Save to Downloads", "Saves in Documents/3DViewer", "#1A3D50", "#00D4FF") {
+            (activity as? MainActivity)?.exportModel(selectedFormat, share = false)
+            dismiss()
+        })
+
+        root.addView(View(ctx).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 8) })
+        root.addView(divider(ctx))
+
+        // ── Share via Apps ───────────────────────────────────────────────────
+        root.addView(sectionLabel(ctx, "SHARE VIA"))
+
+        // System share (all apps)
+        root.addView(makeBigActionBtn(ctx, "↗", "Share via Any App", "Opens system share sheet", "#1A3D50", "#00D4FF") {
+            (activity as? MainActivity)?.exportModel(selectedFormat, share = true)
+            dismiss()
+        })
+
+        root.addView(View(ctx).apply { layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 8) })
+
+        // App grid row
+        val appRow = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setPadding(16, 4, 16, 12)
+        }
+
+        val shareApps = listOf(
+            Triple("💬", "WhatsApp",  "com.whatsapp"),
+            Triple("✈️", "Telegram",  "org.telegram.messenger"),
+            Triple("📧", "Email",     null),
+            Triple("☁️", "Drive",     "com.google.android.apps.docs")
+        )
+        for ((emoji, label, pkg) in shareApps) {
+            appRow.addView(makeAppBtn(ctx, emoji, label) {
+                if (pkg != null && !isAppInstalled(pkg)) {
+                    Toast.makeText(ctx, "$label not installed", Toast.LENGTH_SHORT).show()
+                } else {
+                    (activity as? MainActivity)?.exportModel(selectedFormat, share = true, shareApp = pkg)
+                    dismiss()
+                }
+            })
+        }
+        root.addView(appRow)
+
         return scroll
     }
 
-    private fun actionRow(ctx:android.content.Context,icon:String,title:String,sub:String,color:String,action:()->Unit)=LinearLayout(ctx).apply{
-        orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;background=ctx.getDrawable(R.drawable.bg_card_dark)
-        setPadding(20,0,20,0);minimumHeight=60;isClickable=true;isFocusable=true
-        layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT).apply{setMargins(14,0,14,0)}
-        addView(TextView(ctx).apply{text=icon;textSize=22f;setPadding(0,0,16,0)})
-        addView(LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL
-            layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)
-            addView(TextView(ctx).apply{text=title;textSize=13f;setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(Color.parseColor(color))})
-            addView(TextView(ctx).apply{text=sub;textSize=9f;setTextColor(Color.parseColor("#505070"))})})
-        addView(TextView(ctx).apply{text="›";textSize=20f;setTextColor(Color.parseColor("#303050"))})
-        setOnClickListener{action()}}
+    private fun isAppInstalled(pkg: String): Boolean {
+        return try {
+            requireContext().packageManager.getPackageInfo(pkg, 0)
+            true
+        } catch (_: Exception) { false }
+    }
 
-    private fun refreshBtns(){val ctx=context?:return
-        for((btn,fmt) in fmtBtns){val sel=fmt.id==selectedFormat
-            btn.background=ctx.getDrawable(if(sel) R.drawable.bg_card_selected else R.drawable.bg_card_dark)
-            (btn.getChildAt(0) as? TextView)?.setTextColor(if(sel) Color.parseColor(fmt.color) else Color.WHITE)}}
+    private fun makeFormatBtn(ctx: android.content.Context, title: String, subtitle: String, color: String, active: Boolean): LinearLayout {
+        val card = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            background = ctx.getDrawable(if (active) R.drawable.bg_card_selected else R.drawable.bg_card_dark)
+            setPadding(14, 12, 14, 12)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            tag = Pair(color, active)
+        }
+        card.addView(TextView(ctx).apply {
+            text = title
+            textSize = 16f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.parseColor(color))
+        })
+        card.addView(TextView(ctx).apply {
+            text = subtitle
+            textSize = 10f
+            setTextColor(Color.parseColor("#606080"))
+            setPadding(0, 4, 0, 0)
+        })
+        return card
+    }
 
-    companion object{const val TAG="ExportSheet";fun newInstance()=ExportFragment()}
+    private fun tintFormatBtn(card: LinearLayout, color: String, active: Boolean) {
+        card.background = card.context.getDrawable(if (active) R.drawable.bg_card_selected else R.drawable.bg_card_dark)
+        (card.getChildAt(0) as? TextView)?.setTextColor(Color.parseColor(color))
+    }
+
+    private fun makeBigActionBtn(
+        ctx: android.content.Context,
+        emoji: String, title: String, sub: String,
+        bgHex: String, accentHex: String,
+        onClick: () -> Unit
+    ): LinearLayout {
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            background = ctx.getDrawable(R.drawable.bg_card_dark)
+            setPadding(16, 14, 16, 14)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(16, 0, 16, 0) }
+            setOnClickListener { onClick() }
+        }
+        row.addView(TextView(ctx).apply {
+            text = emoji
+            textSize = 20f
+            layoutParams = LinearLayout.LayoutParams(44, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(0, 0, 12, 0)
+            }
+            gravity = android.view.Gravity.CENTER
+        })
+        val texts = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        }
+        texts.addView(TextView(ctx).apply {
+            text = title; textSize = 13f; setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.parseColor(accentHex))
+        })
+        texts.addView(TextView(ctx).apply {
+            text = sub; textSize = 10f; setTextColor(Color.parseColor("#606080")); setPadding(0, 2, 0, 0)
+        })
+        row.addView(texts)
+        row.addView(TextView(ctx).apply {
+            text = "›"; textSize = 20f; setTextColor(Color.parseColor("#303050"))
+        })
+        return row
+    }
+
+    private fun makeAppBtn(ctx: android.content.Context, emoji: String, label: String, onClick: () -> Unit): LinearLayout {
+        val col = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = android.view.Gravity.CENTER
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setOnClickListener { onClick() }
+        }
+        col.addView(TextView(ctx).apply {
+            text = emoji
+            textSize = 26f
+            gravity = android.view.Gravity.CENTER
+            background = ctx.getDrawable(R.drawable.bg_card_dark)
+            setPadding(16, 14, 16, 14)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { gravity = android.view.Gravity.CENTER }
+        })
+        col.addView(TextView(ctx).apply {
+            text = label; textSize = 10f
+            setTextColor(Color.parseColor("#808099"))
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, 6, 0, 0)
+        })
+        return col
+    }
+
+    private fun sectionLabel(ctx: android.content.Context, text: String) = TextView(ctx).apply {
+        this.text = text; textSize = 9f; letterSpacing = 0.14f
+        setTextColor(Color.parseColor("#505070"))
+        setPadding(20, 14, 20, 6)
+    }
+
+    private fun divider(ctx: android.content.Context) = View(ctx).apply {
+        setBackgroundColor(Color.parseColor("#1A1A28"))
+        layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
+    }
+
+    companion object {
+        const val TAG = "ExportSheet"
+        fun newInstance() = ExportFragment()
+    }
 }

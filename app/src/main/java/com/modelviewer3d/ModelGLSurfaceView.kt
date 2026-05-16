@@ -57,21 +57,13 @@ class ModelGLSurfaceView @JvmOverloads constructor(
                 return true
             }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            // Brush tool: apply brush at tapped surface point
             val ma = context as? MainActivity
             if (ma?.activeTool?.name == "BRUSH") {
-                val bf = ma.supportFragmentManager
-                    .findFragmentByTag(BrushToolFragment.TAG) as? BrushToolFragment
+                val bf = ma.supportFragmentManager.findFragmentByTag(BrushToolFragment.TAG) as? BrushToolFragment
                 if (bf != null) {
-                    queueEvent {
-                        val pt = NativeLib.nativePickPoint(e.x, e.y,
-                            width.toFloat(), height.toFloat())
-                        if (pt != null && pt.size >= 3)
-                            bf.applyBrushAt(pt[0], pt[1], pt[2])
-                    }
-                    requestRender()
-                    return true
-                }
+                    queueEvent { val pt = NativeLib.nativePickPoint(e.x,e.y,width.toFloat(),height.toFloat())
+                        if (pt!=null&&pt.size>=3) bf.applyBrushAt(pt[0],pt[1],pt[2]) }
+                    requestRender(); return true }
             }
                 if (mode == Mode.RULER) {
                     val sx = e.x; val sy = e.y
@@ -106,11 +98,11 @@ class ModelGLSurfaceView @JvmOverloads constructor(
 
     fun attachRenderer(renderer: ModelRenderer) {
         setRenderer(renderer)
-        renderMode = RENDERMODE_WHEN_DIRTY   // Only render when something changed → big FPS improvement
+        renderMode = RENDERMODE_WHEN_DIRTY
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        requestRender()  // always request a frame on touch for responsiveness
+        requestRender()  // touch
         // Scale detector MUST get the event first — it sets isScaling
         scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
