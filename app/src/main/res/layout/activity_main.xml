@@ -400,15 +400,33 @@
                 android:paddingTop="3dp"
                 android:fontFamily="monospace"/>
         </LinearLayout>
-        <LinearLayout android:id="@+id/btnToolBrush"
-            android:layout_width="52dp" android:layout_height="match_parent"
-            android:orientation="vertical" android:gravity="center"
-            android:clickable="true" android:focusable="true"
-            android:background="?attr/selectableItemBackgroundBorderless">
-            <TextView android:layout_width="28dp" android:layout_height="28dp"
-                android:gravity="center" android:text="🖌️" android:textSize="16sp"/>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="Brush" android:textSize="8sp" android:textColor="#9090B0"/>
+        <LinearLayout
+            android:id="@+id/btnToolBrush"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:layout_marginStart="3dp"
+            android:layout_marginEnd="3dp"
+            android:background="@drawable/bg_tool_button"
+            android:clickable="true"
+            android:focusable="true">
+            <ImageView
+                android:id="@+id/icToolBrush"
+                android:layout_width="26dp"
+                android:layout_height="26dp"
+                android:src="@drawable/ic_brush"
+                android:tint="@color/tool_idle_icon"/>
+            <TextView
+                android:id="@+id/lblToolBrush"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Brush"
+                android:textColor="@color/tool_idle_label"
+                android:textSize="10sp"
+                android:paddingTop="3dp"
+                android:fontFamily="monospace"/>
         </LinearLayout>
     </LinearLayout>
 

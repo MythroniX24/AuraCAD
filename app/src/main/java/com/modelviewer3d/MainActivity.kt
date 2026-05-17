@@ -71,11 +71,13 @@ class MainActivity : AppCompatActivity() {
     private var icToolRotate: ImageView? = null
     private var icToolScale:  ImageView? = null
     private var icToolRing:   ImageView? = null
+    private var icToolBrush:  ImageView? = null
     private var lblToolSelect: TextView? = null
     private var lblToolMove:   TextView? = null
     private var lblToolRotate: TextView? = null
     private var lblToolScale:  TextView? = null
     private var lblToolRing:   TextView? = null
+    private var lblToolBrush:  TextView? = null
 
     internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING , BRUSH }
     internal var activeTool: Tool = Tool.NONE
@@ -122,16 +124,19 @@ class MainActivity : AppCompatActivity() {
             btnToolRotate = findViewById(R.id.btnToolRotate)
             btnToolScale  = findViewById(R.id.btnToolScale)
             btnToolRing   = findViewById(R.id.btnToolRing)
+            btnToolBrush  = findViewById(R.id.btnToolBrush)
             icToolSelect = findViewById(R.id.icToolSelect)
             icToolMove   = findViewById(R.id.icToolMove)
             icToolRotate = findViewById(R.id.icToolRotate)
             icToolScale  = findViewById(R.id.icToolScale)
             icToolRing   = findViewById(R.id.icToolRing)
+            icToolBrush  = findViewById(R.id.icToolBrush)
             lblToolSelect = findViewById(R.id.lblToolSelect)
             lblToolMove   = findViewById(R.id.lblToolMove)
             lblToolRotate = findViewById(R.id.lblToolRotate)
             lblToolScale  = findViewById(R.id.lblToolScale)
             lblToolRing   = findViewById(R.id.lblToolRing)
+            lblToolBrush  = findViewById(R.id.lblToolBrush)
 
             renderer = ModelRenderer()
             renderer.onFpsUpdate = { fps ->
@@ -298,7 +303,8 @@ class MainActivity : AppCompatActivity() {
             Triple(btnToolMove,   icToolMove,   lblToolMove  ) to (activeTool == Tool.MOVE),
             Triple(btnToolRotate, icToolRotate, lblToolRotate) to (activeTool == Tool.ROTATE),
             Triple(btnToolScale,  icToolScale,  lblToolScale ) to (activeTool == Tool.SCALE),
-            Triple(btnToolRing,   icToolRing,   lblToolRing  ) to (activeTool == Tool.RING)
+            Triple(btnToolRing,   icToolRing,   lblToolRing  ) to (activeTool == Tool.RING),
+            Triple(btnToolBrush,  icToolBrush,  lblToolBrush ) to (activeTool == Tool.BRUSH)
         )
         val activeBg     = ContextCompat.getDrawable(this, R.drawable.bg_tool_button_active)
         val idleBg       = ContextCompat.getDrawable(this, R.drawable.bg_tool_button)
