@@ -63,21 +63,21 @@ class MainActivity : AppCompatActivity() {
     private var btnToolMove:   View? = null
     private var btnToolRotate: View? = null
     private var btnToolScale:  View? = null
+    private var btnToolBrush: View? = null
     private var btnToolRing:   View? = null
-    private var btnToolBrush:  View? = null
 
     private var icToolSelect: ImageView? = null
     private var icToolMove:   ImageView? = null
     private var icToolRotate: ImageView? = null
     private var icToolScale:  ImageView? = null
+    private var icToolBrush:  android.widget.ImageView? = null
     private var icToolRing:   ImageView? = null
-    private var icToolBrush:  ImageView? = null
     private var lblToolSelect: TextView? = null
     private var lblToolMove:   TextView? = null
     private var lblToolRotate: TextView? = null
     private var lblToolScale:  TextView? = null
+    private var lblToolBrush: android.widget.TextView? = null
     private var lblToolRing:   TextView? = null
-    private var lblToolBrush:  TextView? = null
 
     internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING , BRUSH }
     internal var activeTool: Tool = Tool.NONE
@@ -130,13 +130,13 @@ class MainActivity : AppCompatActivity() {
             icToolRotate = findViewById(R.id.icToolRotate)
             icToolScale  = findViewById(R.id.icToolScale)
             icToolRing   = findViewById(R.id.icToolRing)
-            icToolBrush  = findViewById(R.id.icToolBrush)
+            icToolBrush  = btnToolBrush?.findViewById(R.id.icToolBrush)
             lblToolSelect = findViewById(R.id.lblToolSelect)
             lblToolMove   = findViewById(R.id.lblToolMove)
             lblToolRotate = findViewById(R.id.lblToolRotate)
             lblToolScale  = findViewById(R.id.lblToolScale)
             lblToolRing   = findViewById(R.id.lblToolRing)
-            lblToolBrush  = findViewById(R.id.lblToolBrush)
+            lblToolBrush  = btnToolBrush?.findViewById<android.widget.TextView>(R.id.lblToolBrush)
 
             renderer = ModelRenderer()
             renderer.onFpsUpdate = { fps ->
@@ -174,8 +174,8 @@ class MainActivity : AppCompatActivity() {
             btnToolMove  ?.setOnClickListener { onToolClicked(Tool.MOVE)   }
             btnToolRotate?.setOnClickListener { onToolClicked(Tool.ROTATE) }
             btnToolScale ?.setOnClickListener { onToolClicked(Tool.SCALE)  }
-            btnToolRing  ?.setOnClickListener { onToolClicked(Tool.RING)   }
-            btnToolBrush ?.setOnClickListener { onToolClicked(Tool.BRUSH)  }
+            btnToolRing  ?.setOnClickListener { onToolClicked(Tool.RING)
+            btnToolBrush ?.setOnClickListener { onToolClicked(Tool.BRUSH) }   }
 
             // ── Selection chip ───────────────────────────────────────────────
             findViewById<View?>(R.id.btnSelectionClear)?.setOnClickListener { clearSelection() }
@@ -288,7 +288,7 @@ class MainActivity : AppCompatActivity() {
                     activeTool = Tool.NONE
                     updateToolButtons()
                 } else {
-                    openEditor()
+                    findViewById<View>(R.id.btnMeshTools).performClick()
                 }
             }
             Tool.RING  -> { openRingTool() }
@@ -712,7 +712,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────
-    private fun openBrushTool() {
+    internal fun openBrushTool() {
         if (supportFragmentManager.findFragmentByTag(BrushToolFragment.TAG) != null) return
         BrushToolFragment.newInstance().show(supportFragmentManager, BrushToolFragment.TAG)
     }
@@ -728,7 +728,7 @@ class MainActivity : AppCompatActivity() {
         if (supportFragmentManager.findFragmentByTag(MeshInfoFragment.TAG) != null) return
         MeshInfoFragment.newInstance().show(supportFragmentManager, MeshInfoFragment.TAG)
     }
-    private fun openRingTool() {
+        private fun openRingTool() {
         if (supportFragmentManager.findFragmentByTag(RingToolFragment.TAG) != null) return
         RingToolFragment.newInstance().show(supportFragmentManager, RingToolFragment.TAG)
     }

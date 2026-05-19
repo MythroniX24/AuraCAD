@@ -400,6 +400,7 @@
                 android:paddingTop="3dp"
                 android:fontFamily="monospace"/>
         </LinearLayout>
+
         <LinearLayout
             android:id="@+id/btnToolBrush"
             android:layout_width="0dp"
@@ -407,8 +408,6 @@
             android:layout_weight="1"
             android:orientation="vertical"
             android:gravity="center"
-            android:layout_marginStart="3dp"
-            android:layout_marginEnd="3dp"
             android:background="@drawable/bg_tool_button"
             android:clickable="true"
             android:focusable="true">
@@ -425,8 +424,7 @@
                 android:text="Brush"
                 android:textColor="@color/tool_idle_label"
                 android:textSize="10sp"
-                android:paddingTop="3dp"
-                android:fontFamily="monospace"/>
+                android:paddingTop="3dp"/>
         </LinearLayout>
     </LinearLayout>
 

@@ -1,35 +1,39 @@
 package com.modelviewer3d
-import android.graphics.Color; import android.os.Bundle; import android.view.*; import android.widget.*
+import android.graphics.Color;import android.os.Bundle;import android.view.*;import android.widget.*
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-class RotateToolFragment : BottomSheetDialogFragment() {
-    private var rotX=0f; private var rotY=0f; private var rotZ=0f
+class RotateToolFragment:BottomSheetDialogFragment(){
+    private var rotX=0f;private var rotY=0f;private var rotZ=0f
     override fun onCreateView(i:LayoutInflater,c:ViewGroup?,s:Bundle?):View{
-        val ctx=requireContext(); val scroll=ScrollView(ctx)
+        val ctx=requireContext();val scroll=ScrollView(ctx)
         val root=LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL;setBackgroundResource(R.drawable.bg_bottom_sheet);setPadding(0,0,0,40)}
         scroll.addView(root)
-        root.addView(LinearLayout(ctx).apply{gravity=android.view.Gravity.CENTER_HORIZONTAL;setPadding(0,14,0,0);addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#404058"));layoutParams=LinearLayout.LayoutParams(48,4)})})
-        root.addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(20,14,20,4)
-            addView(TextView(ctx).apply{text="🔄  Rotate";textSize=17f;setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(Color.WHITE);layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)})
-            addView(Button(ctx).apply{text="Reset";textSize=10f;setTextColor(Color.parseColor("#FF7043"));background=ctx.getDrawable(R.drawable.bg_btn_danger);setPadding(16,0,16,0);layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,36);setOnClickListener{rotX=0f;rotY=0f;rotZ=0f;glRun{NativeLib.nativeSetRotation(0f,0f,0f)}}})})
-        root.addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#1A1A28"));layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,1)})
+        root.addView(handle(ctx))
+        root.addView(titleRow(ctx,"🔄  Rotate"){rotX=0f;rotY=0f;rotZ=0f;gl{NativeLib.nativeSetRotation(0f,0f,0f)}})
+        root.addView(div(ctx))
         root.addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;setPadding(14,8,14,0)
             for((lbl,ax,deg) in listOf(Triple("+90X","X",90f),Triple("−90X","X",-90f),Triple("180Y","Y",180f),Triple("180Z","Z",180f))){
                 addView(Button(ctx).apply{text=lbl;textSize=9f;setTextColor(Color.parseColor("#9090B0"));background=ctx.getDrawable(R.drawable.bg_card_dark)
                     layoutParams=LinearLayout.LayoutParams(0,36,1f).apply{setMargins(3,0,3,0)}
-                    setOnClickListener{when(ax){"X"->rotX=(rotX+deg).coerceIn(-180f,180f);"Y"->rotY=(rotY+deg).coerceIn(-180f,180f);"Z"->rotZ=(rotZ+deg).coerceIn(-180f,180f)};glRun{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}}})}})
-        root.addView(axis(ctx,"X  Tilt",Color.parseColor("#FF9800"),-180f,180f,rotX){v->rotX=v;glRun{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}})
-        root.addView(axis(ctx,"Y  Spin",Color.parseColor("#4CAF82"),-180f,180f,rotY){v->rotY=v;glRun{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}})
-        root.addView(axis(ctx,"Z  Roll",Color.parseColor("#00D4FF"),-180f,180f,rotZ){v->rotZ=v;glRun{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}})
+                    setOnClickListener{when(ax){"X"->rotX=(rotX+deg).coerceIn(-180f,180f);"Y"->rotY=(rotY+deg).coerceIn(-180f,180f);"Z"->rotZ=(rotZ+deg).coerceIn(-180f,180f)};gl{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}}})}})
+        root.addView(axis(ctx,"X  Tilt",Color.parseColor("#FF9800"),-180f,180f){v->rotX=v;gl{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}})
+        root.addView(axis(ctx,"Y  Spin",Color.parseColor("#4CAF82"),-180f,180f){v->rotY=v;gl{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}})
+        root.addView(axis(ctx,"Z  Roll",Color.parseColor("#00D4FF"),-180f,180f){v->rotZ=v;gl{NativeLib.nativeSetRotation(rotX,rotY,rotZ)}})
         return scroll
     }
-    private fun axis(ctx:android.content.Context,lbl:String,tint:Int,min:Float,max:Float,init:Float,cb:(Float)->Unit)=LinearLayout(ctx).apply{orientation=LinearLayout.VERTICAL;setPadding(20,10,20,4)
-        val tvV=TextView(ctx).apply{text="%.0f°".format(init);textSize=11f;setTextColor(Color.parseColor("#00D4FF"))}
+    private fun axis(ctx:android.content.Context,l:String,t:Int,min:Float,max:Float,cb:(Float)->Unit)=LinearLayout(ctx).apply{
+        orientation=LinearLayout.VERTICAL;setPadding(20,10,20,4)
+        val tv=TextView(ctx).apply{text="0°";textSize=11f;setTextColor(Color.parseColor("#00D4FF"))}
         addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL
-            addView(TextView(ctx).apply{text=lbl;textSize=12f;setTextColor(Color.parseColor("#9090B0"));layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)});addView(tvV)})
-        addView(SeekBar(ctx).apply{setMax(1000);progress=((init-min)/(max-min)*1000).toInt().coerceIn(0,1000)
-            progressTintList=android.content.res.ColorStateList.valueOf(tint);thumbTintList=android.content.res.ColorStateList.valueOf(tint)
-            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{override fun onStartTrackingTouch(b:SeekBar){}; override fun onStopTrackingTouch(b:SeekBar){}
-                override fun onProgressChanged(b:SeekBar,p:Int,fromUser:Boolean){if(!fromUser)return;val v=min+p/1000f*(max-min);tvV.text="%.0f°".format(v);cb(v)}})})}
-    private fun glRun(block:()->Unit)=(activity as? MainActivity)?.glView?.queueEvent(block)
+            addView(TextView(ctx).apply{text=l;textSize=12f;setTextColor(Color.parseColor("#9090B0"));layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)});addView(tv)})
+        addView(SeekBar(ctx).apply{setMax(1000);progress=500
+            progressTintList=android.content.res.ColorStateList.valueOf(t);thumbTintList=android.content.res.ColorStateList.valueOf(t)
+            setOnSeekBarChangeListener(object:SeekBar.OnSeekBarChangeListener{override fun onStartTrackingTouch(b:SeekBar){};override fun onStopTrackingTouch(b:SeekBar){}
+                override fun onProgressChanged(b:SeekBar,p:Int,fu:Boolean){if(!fu)return;val v=min+(p/1000f)*(max-min);tv.text="%.0f°".format(v);cb(v)}})})}
+    private fun handle(c:android.content.Context)=LinearLayout(c).apply{gravity=android.view.Gravity.CENTER_HORIZONTAL;setPadding(0,14,0,0);addView(View(c).apply{setBackgroundColor(Color.parseColor("#404058"));layoutParams=LinearLayout.LayoutParams(48,4)})}
+    private fun titleRow(c:android.content.Context,t:String,reset:()->Unit)=LinearLayout(c).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(20,14,20,4)
+        addView(TextView(c).apply{text=t;textSize=17f;setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(Color.WHITE);layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)})
+        addView(Button(c).apply{text="Reset";textSize=10f;setTextColor(Color.parseColor("#FF7043"));background=c.getDrawable(R.drawable.bg_btn_danger);setPadding(16,0,16,0);layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,36);setOnClickListener{reset()}})}
+    private fun div(c:android.content.Context)=View(c).apply{setBackgroundColor(Color.parseColor("#1A1A28"));layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,1)}
+    private fun gl(block:()->Unit)=(activity as? MainActivity)?.glView?.queueEvent(block)
     companion object{const val TAG="RotateTool";fun newInstance()=RotateToolFragment()}
 }

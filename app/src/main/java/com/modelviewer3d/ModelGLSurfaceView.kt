@@ -57,14 +57,6 @@ class ModelGLSurfaceView @JvmOverloads constructor(
                 return true
             }
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-            val ma = context as? MainActivity
-            if (ma?.activeTool?.name == "BRUSH") {
-                val bf = ma.supportFragmentManager.findFragmentByTag(BrushToolFragment.TAG) as? BrushToolFragment
-                if (bf != null) {
-                    queueEvent { val pt = NativeLib.nativePickPoint(e.x,e.y,width.toFloat(),height.toFloat())
-                        if (pt!=null&&pt.size>=3) bf.applyBrushAt(pt[0],pt[1],pt[2]) }
-                    requestRender(); return true }
-            }
                 if (mode == Mode.RULER) {
                     val sx = e.x; val sy = e.y
                     val sw = width.toFloat(); val sh = height.toFloat()
@@ -102,7 +94,26 @@ class ModelGLSurfaceView @JvmOverloads constructor(
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        requestRender()  // touch
+        // ── Brush drag sculpting ──────────────────────────────────────────────
+        val _ma = context as? MainActivity
+        if (_ma?.activeTool?.name == "BRUSH") {
+            val _action = event.actionMasked
+            if (_action == android.view.MotionEvent.ACTION_DOWN ||
+                _action == android.view.MotionEvent.ACTION_MOVE) {
+                val _bf = _ma.supportFragmentManager
+                    .findFragmentByTag(BrushToolFragment.TAG) as? BrushToolFragment
+                if (_bf != null) {
+                    val _ex=event.x; val _ey=event.y
+                    val _sw=width.toFloat(); val _sh=height.toFloat()
+                    queueEvent {
+                        val pt = NativeLib.nativePickPoint(_ex, _ey, _sw, _sh)
+                        if (pt != null && pt.size >= 3) _bf.applyBrushAt(pt[0], pt[1], pt[2])
+                    }
+                    requestRender()
+                }
+            }
+        }
+        requestRender()
         // Scale detector MUST get the event first — it sets isScaling
         scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)

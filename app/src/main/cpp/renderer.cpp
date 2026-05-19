@@ -1567,72 +1567,130 @@ bool Renderer::analyzeRing(int meshIdx) {
     const size_t N = mo.vertices.size();
     if (N < 64) return false;
 
-    double cx=0,cy=0,cz=0;
-    for (const auto& v:mo.vertices){ cx+=v.px; cy+=v.py; cz+=v.pz; }
-    cx/=N; cy/=N; cz/=N;
-    Vec3 cen{(float)cx,(float)cy,(float)cz};
+    // ── Pass 1: crude centroid + covariance for initial axis ─────────────────
+    double cx = 0, cy = 0, cz = 0;
+    for (const auto& v : mo.vertices) { cx += v.px; cy += v.py; cz += v.pz; }
+    cx /= (double)N; cy /= (double)N; cz /= (double)N;
+    Vec3 cen0{(float)cx, (float)cy, (float)cz};
 
-    float C[3][3]={}; for (const auto& v:mo.vertices){
-        float d[3]={v.px-(float)cx,v.py-(float)cy,v.pz-(float)cz};
-        for(int i=0;i<3;i++) for(int j=0;j<3;j++) C[i][j]+=d[i]*d[j]; }
-    float Vm[3][3]; jacobiEigen3(C,Vm);
-    Vec3 axis{Vm[0][0],Vm[1][0],Vm[2][0]};
-    float al=sqrtf(axis.x*axis.x+axis.y*axis.y+axis.z*axis.z);
-    if(al<1e-9f) return false;
-    axis.x/=al; axis.y/=al; axis.z/=al;
-
-    std::vector<float> radii(N); float axMin=FLT_MAX,axMax=-FLT_MAX;
-    for(size_t i=0;i<N;i++){
-        const auto& v=mo.vertices[i];
-        float dx=v.px-cen.x,dy=v.py-cen.y,dz=v.pz-cen.z;
-        float along=dx*axis.x+dy*axis.y+dz*axis.z;
-        axMin=std::min(axMin,along); axMax=std::max(axMax,along);
-        float rx=dx-along*axis.x,ry=dy-along*axis.y,rz=dz-along*axis.z;
-        radii[i]=sqrtf(rx*rx+ry*ry+rz*rz); }
-    std::vector<float> sR=radii; std::sort(sR.begin(),sR.end());
-    float boreCut=sR[(size_t)(N*0.10f)]*1.5f;
-
-    // Refine axis with bore vertices only
-    double icx=0,icy=0,icz=0; int nB=0;
-    for(size_t i=0;i<N;i++) if(radii[i]<=boreCut){icx+=mo.vertices[i].px;icy+=mo.vertices[i].py;icz+=mo.vertices[i].pz;++nB;}
-    if(nB>=32){
-        icx/=nB; icy/=nB; icz/=nB;
-        float Cb[3][3]={};
-        for(size_t i=0;i<N;i++){if(radii[i]>boreCut)continue;
-            float d[3]={mo.vertices[i].px-(float)icx,mo.vertices[i].py-(float)icy,mo.vertices[i].pz-(float)icz};
-            for(int ii=0;ii<3;ii++) for(int jj=0;jj<3;jj++) Cb[ii][jj]+=d[ii]*d[jj];}
-        float Vb[3][3]; jacobiEigen3(Cb,Vb);
-        Vec3 axB{Vb[0][0],Vb[1][0],Vb[2][0]};
-        float abL=sqrtf(axB.x*axB.x+axB.y*axB.y+axB.z*axB.z);
-        if(abL>1e-9f){axB.x/=abL;axB.y/=abL;axB.z/=abL;
-            if(fabsf(axB.x*axis.x+axB.y*axis.y+axB.z*axis.z)>0.766f){
-                axis=axB; cen={float(icx),float(icy),float(icz)};}}
+    float C[3][3] = {};
+    for (const auto& v : mo.vertices) {
+        float d[3] = {v.px-(float)cx, v.py-(float)cy, v.pz-(float)cz};
+        for (int i=0;i<3;i++) for (int j=0;j<3;j++) C[i][j] += d[i]*d[j];
     }
-    // Recompute with refined axis
-    axMin=FLT_MAX; axMax=-FLT_MAX;
-    for(size_t i=0;i<N;i++){const auto& v=mo.vertices[i];
-        float dx=v.px-cen.x,dy=v.py-cen.y,dz=v.pz-cen.z;
-        float along=dx*axis.x+dy*axis.y+dz*axis.z;
-        axMin=std::min(axMin,along); axMax=std::max(axMax,along);
-        float rx=dx-along*axis.x,ry=dy-along*axis.y,rz=dz-along*axis.z;
-        radii[i]=sqrtf(rx*rx+ry*ry+rz*rz);}
-    std::copy(radii.begin(),radii.end(),sR.begin()); std::sort(sR.begin(),sR.end());
-    float innerR=sR[(size_t)(N*0.03f)], outerR=sR[(size_t)(N*0.97f)];
-    if(outerR-innerR<1e-7f) return false;
+    float Vmat[3][3];
+    jacobiEigen3(C, Vmat);
+    // Smallest eigenvalue → axis (least variance = through-hole direction)
+    Vec3 axis {Vmat[0][0], Vmat[1][0], Vmat[2][0]};
+    {
+        float alen = sqrtf(axis.x*axis.x + axis.y*axis.y + axis.z*axis.z);
+        if (alen < 1e-9f) return false;
+        axis.x /= alen; axis.y /= alen; axis.z /= alen;
+    }
 
-    m_ring.center=cen; m_ring.axis=axis;
-    m_ring.innerR=innerR; m_ring.outerR=outerR;
-    m_ring.origInnerR=innerR; m_ring.origOuterR=outerR;
-    m_ring.currentInnerR=innerR; m_ring.currentOuterR=outerR;
-    m_ring.heightAx=axMax-axMin; m_ring.valid=true; m_ring.meshIdx=meshIdx;
-    m_ring.origVerts=mo.vertices;
-    float toMM=(m_normalizeScale>1e-9f)?(1.f/m_normalizeScale):1.f;
-    LOGI("Ring v3 (median): inner=%.3fmm outer=%.3fmm band=%.3fmm h=%.3fmm bore=%d",
-         innerR*toMM,outerR*toMM,(outerR-innerR)*toMM,(axMax-axMin)*toMM,nB);
+    // ── Pass 2: compute radial distances, find innerR via 5th percentile ─────
+    std::vector<float> radii(N);
+    float axMin = FLT_MAX, axMax = -FLT_MAX;
+    for (size_t i = 0; i < N; ++i) {
+        const auto& v = mo.vertices[i];
+        float dx = v.px-cen0.x, dy = v.py-cen0.y, dz = v.pz-cen0.z;
+        float along = dx*axis.x + dy*axis.y + dz*axis.z;
+        axMin = std::min(axMin, along); axMax = std::max(axMax, along);
+        float rx = dx-along*axis.x, ry = dy-along*axis.y, rz = dz-along*axis.z;
+        radii[i] = sqrtf(rx*rx + ry*ry + rz*rz);
+    }
+    std::vector<float> sortedR = radii;
+    std::sort(sortedR.begin(), sortedR.end());
+    float p05 = sortedR[(size_t)(N * 0.05)];  // inner bore radius estimate
+    float p95 = sortedR[(size_t)(N * 0.95)];  // outer surface radius estimate
+    if (p95 - p05 < 1e-7f) return false;
+
+    // ── Pass 3: refine centroid + axis using INNER BORE vertices ONLY ─────────
+    // Inner bore is a clean cylinder — texture only affects outer geometry.
+    // This makes axis detection immune to carved/embossed patterns.
+    float boreCut = p05 * 1.35f;  // inner bore: all verts with r < 135% of p05
+    double icx = 0, icy = 0, icz = 0;
+    int nBore = 0;
+    for (size_t i = 0; i < N; ++i) {
+        if (radii[i] <= boreCut) {
+            icx += mo.vertices[i].px;
+            icy += mo.vertices[i].py;
+            icz += mo.vertices[i].pz;
+            ++nBore;
+        }
+    }
+    Vec3 cen = cen0;  // default to crude centroid
+    Vec3 axisRefined = axis;
+
+    if (nBore >= 64) {
+        icx /= nBore; icy /= nBore; icz /= nBore;
+        Vec3 boreCen{(float)icx, (float)icy, (float)icz};
+
+        // Covariance from bore vertices only
+        float Cb[3][3] = {};
+        for (size_t i = 0; i < N; ++i) {
+            if (radii[i] > boreCut) continue;
+            float d[3] = {mo.vertices[i].px-(float)icx,
+                          mo.vertices[i].py-(float)icy,
+                          mo.vertices[i].pz-(float)icz};
+            for (int ii=0;ii<3;ii++) for (int jj=0;jj<3;jj++) Cb[ii][jj] += d[ii]*d[jj];
+        }
+        float Vb[3][3];
+        jacobiEigen3(Cb, Vb);
+        Vec3 axB{Vb[0][0], Vb[1][0], Vb[2][0]};
+        float abLen = sqrtf(axB.x*axB.x + axB.y*axB.y + axB.z*axB.z);
+        if (abLen > 1e-9f) {
+            axB.x /= abLen; axB.y /= abLen; axB.z /= abLen;
+            // Accept refined axis only if aligned within 30° of crude axis
+            float dot = fabsf(axB.x*axis.x + axB.y*axis.y + axB.z*axis.z);
+            if (dot > 0.866f) {  // cos(30°)
+                axisRefined = axB;
+                cen = boreCen;
+                LOGI("Ring: bore-refined axis & centroid from %d/%zu verts", nBore, N);
+            }
+        }
+    }
+
+    // ── Pass 4: recompute radii & percentiles with refined axis ──────────────
+    axMin = FLT_MAX; axMax = -FLT_MAX;
+    for (size_t i = 0; i < N; ++i) {
+        const auto& v = mo.vertices[i];
+        float dx = v.px-cen.x, dy = v.py-cen.y, dz = v.pz-cen.z;
+        float along = dx*axisRefined.x + dy*axisRefined.y + dz*axisRefined.z;
+        axMin = std::min(axMin, along); axMax = std::max(axMax, along);
+        float rx = dx-along*axisRefined.x, ry = dy-along*axisRefined.y, rz = dz-along*axisRefined.z;
+        radii[i] = sqrtf(rx*rx + ry*ry + rz*rz);
+    }
+    std::copy(radii.begin(), radii.end(), sortedR.begin());
+    std::sort(sortedR.begin(), sortedR.end());
+
+    // Use conservative percentiles: 3rd and 97th for cleaner inner/outer boundaries
+    float innerR = sortedR[(size_t)(N * 0.03f)];
+    float outerR = sortedR[(size_t)(N * 0.97f)];
+    if (outerR - innerR < 1e-7f) return false;
+
+    // ── Store ─────────────────────────────────────────────────────────────────
+    m_ring.center        = cen;
+    m_ring.axis          = axisRefined;
+    m_ring.innerR        = innerR;
+    m_ring.outerR        = outerR;
+    m_ring.origInnerR    = innerR;
+    m_ring.origOuterR    = outerR;
+    m_ring.currentInnerR = innerR;
+    m_ring.currentOuterR = outerR;
+    m_ring.heightAx      = axMax - axMin;
+    m_ring.valid         = true;
+    m_ring.meshIdx       = meshIdx;
+    m_ring.origVerts     = mo.vertices;  // ← FULL backup, deformation always starts here
+
+    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
+    LOGI("Ring v3: innerR=%.3fmm outerR=%.3fmm band=%.3fmm h=%.3fmm axis=(%.3f,%.3f,%.3f) N=%zu borePts=%d",
+         innerR*toMM, outerR*toMM, (outerR-innerR)*toMM, (axMax-axMin)*toMM,
+         axisRefined.x, axisRefined.y, axisRefined.z, N, nBore);
     return true;
 }
 
-
+// ── Parameters in mm ─────────────────────────────────────────────────────────
 bool Renderer::getRingParams(float out[6]) const {
     if (!m_ring.valid) return false;
     float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
@@ -1738,52 +1796,46 @@ void Renderer::applyRingDeformation(float newInnerN, float newOuterN) {
 
 
 
-// ══════ FRUSTUM CULLING + BRUSH SCULPTING ENGINE ══════════════════════════════
-
-Frustum Renderer::buildFrustum() const {
-    float aspect=(float)m_width/std::max(m_height,1);
-    Mat4 view=Mat4::lookAt(cameraEye(),Vec3{m_panX,m_panY,0.f},Vec3{0,1,0});
-    Mat4 proj=Mat4::perspective(45.f*(3.14159265f/180.f),aspect,0.01f,100.f);
-    Mat4 vp=proj*view;
+// ══ FRUSTUM + BRUSH ENGINE ══════════════════════════════════════════════════
+Frustum Renderer::buildFrustum()const{
+    float asp=(float)m_width/std::max(m_height,1);
+    Mat4 vp=Mat4::perspective(45.f*(3.14159265f/180.f),asp,0.01f,100.f)*Mat4::lookAt(cameraEye(),Vec3{m_panX,m_panY,0.f},Vec3{0,1,0});
     Frustum f;
     for(int i=0;i<4;i++){f.planes[0][i]=vp.m[i*4+3]+vp.m[i*4+0];f.planes[1][i]=vp.m[i*4+3]-vp.m[i*4+0];
-                          f.planes[2][i]=vp.m[i*4+3]+vp.m[i*4+1];f.planes[3][i]=vp.m[i*4+3]-vp.m[i*4+1];
-                          f.planes[4][i]=vp.m[i*4+3]+vp.m[i*4+2];f.planes[5][i]=vp.m[i*4+3]-vp.m[i*4+2];}
-    for(int p=0;p<6;p++){float len=sqrtf(f.planes[p][0]*f.planes[p][0]+f.planes[p][1]*f.planes[p][1]+f.planes[p][2]*f.planes[p][2]);
-        if(len>1e-9f) for(int i=0;i<4;i++) f.planes[p][i]/=len;}
+        f.planes[2][i]=vp.m[i*4+3]+vp.m[i*4+1];f.planes[3][i]=vp.m[i*4+3]-vp.m[i*4+1];
+        f.planes[4][i]=vp.m[i*4+3]+vp.m[i*4+2];f.planes[5][i]=vp.m[i*4+3]-vp.m[i*4+2];}
+    for(int p=0;p<6;p++){float l=sqrtf(f.planes[p][0]*f.planes[p][0]+f.planes[p][1]*f.planes[p][1]+f.planes[p][2]*f.planes[p][2]);if(l>1e-9f)for(int i=0;i<4;i++)f.planes[p][i]/=l;}
     return f;
 }
-bool Renderer::frustumSphereTest(const Frustum& f,float cx,float cy,float cz,float r) const {
+bool Renderer::frustumSphereTest(const Frustum&f,float cx,float cy,float cz,float r)const{
     for(int p=0;p<6;p++){float d=f.planes[p][0]*cx+f.planes[p][1]*cy+f.planes[p][2]*cz+f.planes[p][3];if(d<-r)return false;}
     return true;
 }
-void Renderer::buildMeshAdjacency(const MeshObject& mo,std::vector<std::vector<uint32_t>>& adj) const {
+void Renderer::buildMeshAdjacency(const MeshObject&mo,std::vector<std::vector<uint32_t>>&adj)const{
     adj.assign(mo.vertices.size(),{});
-    for(size_t i=0;i+2<mo.indices.size();i+=3){uint32_t a=mo.indices[i],b=mo.indices[i+1],c2=mo.indices[i+2];
-        adj[a].push_back(b);adj[a].push_back(c2);adj[b].push_back(a);adj[b].push_back(c2);adj[c2].push_back(a);adj[c2].push_back(b);}
+    for(size_t i=0;i+2<mo.indices.size();i+=3){uint32_t a=mo.indices[i],b=mo.indices[i+1],cc=mo.indices[i+2];
+        adj[a].push_back(b);adj[a].push_back(cc);adj[b].push_back(a);adj[b].push_back(cc);adj[cc].push_back(a);adj[cc].push_back(b);}
 }
-static inline float gaussFalloff(float d2,float r2){float t=d2/r2;if(t>=1.f)return 0.f;float t3=t*t*t;return 1.f-t3*(10.f-t*(15.f-t*6.f));}
-
-void Renderer::applySmooth(int meshIdx,float wx,float wy,float wz,float radius,float intensity){
-    if(meshIdx<0||meshIdx>=(int)m_meshes.size()) return;
-    auto& mo=m_meshes[meshIdx]; float r2=radius*radius;
-    std::vector<std::vector<uint32_t>> adj; buildMeshAdjacency(mo,adj);
+static inline float gFall(float d2,float r2){float t=d2/r2;if(t>=1.f)return 0.f;float t3=t*t*t;return 1.f-t3*(10.f-t*(15.f-t*6.f));}
+void Renderer::applySmooth(int mi,float wx,float wy,float wz,float radius,float intensity){
+    if(mi<0||mi>=(int)m_meshes.size())return;
+    auto&mo=m_meshes[mi];float r2=radius*radius;
+    std::vector<std::vector<uint32_t>>adj;buildMeshAdjacency(mo,adj);
     const size_t N=mo.vertices.size();
-    struct VW{size_t i;float w;}; std::vector<VW> aff; aff.reserve(512);
-    for(size_t i=0;i<N;i++){const auto& v=mo.vertices[i];float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;float w=gaussFalloff(dx*dx+dy*dy+dz*dz,r2);if(w>0.001f)aff.push_back({i,w});}
-    if(aff.empty()) return;
-    std::vector<Vec3> np(N); for(size_t i=0;i<N;i++) np[i]={mo.vertices[i].px,mo.vertices[i].py,mo.vertices[i].pz};
-    for(auto& vw:aff){const auto& nb=adj[vw.i];if(nb.empty())continue;float cx=0,cy=0,cz=0;for(uint32_t n:nb){cx+=mo.vertices[n].px;cy+=mo.vertices[n].py;cz+=mo.vertices[n].pz;}float inv=1.f/(float)nb.size();cx*=inv;cy*=inv;cz*=inv;float d=intensity*vw.w;np[vw.i].x+=d*(cx-np[vw.i].x);np[vw.i].y+=d*(cy-np[vw.i].y);np[vw.i].z+=d*(cz-np[vw.i].z);}
-    for(auto& vw:aff){mo.vertices[vw.i].px=np[vw.i].x;mo.vertices[vw.i].py=np[vw.i].y;mo.vertices[vw.i].pz=np[vw.i].z;}
-    regenerateNormals(mo); updateMeshVBO(mo);
+    struct VW{size_t i;float w;};std::vector<VW>aff;aff.reserve(512);
+    for(size_t i=0;i<N;i++){const auto&v=mo.vertices[i];float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;float w=gFall(dx*dx+dy*dy+dz*dz,r2);if(w>0.001f)aff.push_back({i,w});}
+    if(aff.empty())return;
+    std::vector<Vec3>np(N);for(size_t i=0;i<N;i++)np[i]={mo.vertices[i].px,mo.vertices[i].py,mo.vertices[i].pz};
+    for(auto&vw:aff){const auto&nb=adj[vw.i];if(nb.empty())continue;float cx=0,cy=0,cz=0;for(uint32_t n:nb){cx+=mo.vertices[n].px;cy+=mo.vertices[n].py;cz+=mo.vertices[n].pz;}float inv=1.f/(float)nb.size();cx*=inv;cy*=inv;cz*=inv;float d=intensity*vw.w;np[vw.i].x+=d*(cx-np[vw.i].x);np[vw.i].y+=d*(cy-np[vw.i].y);np[vw.i].z+=d*(cz-np[vw.i].z);}
+    for(auto&vw:aff){mo.vertices[vw.i].px=np[vw.i].x;mo.vertices[vw.i].py=np[vw.i].y;mo.vertices[vw.i].pz=np[vw.i].z;}
+    regenerateNormals(mo);updateMeshVBO(mo);
 }
-void Renderer::applySculpt(int meshIdx,float wx,float wy,float wz,float radius,float intensity,float sign){
-    if(meshIdx<0||meshIdx>=(int)m_meshes.size()) return;
-    auto& mo=m_meshes[meshIdx]; float r2=radius*radius; bool any=false;
-    for(auto& v:mo.vertices){float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;float w=gaussFalloff(dx*dx+dy*dy+dz*dz,r2);if(w<0.001f)continue;float d=sign*intensity*w;v.px+=d*v.nx;v.py+=d*v.ny;v.pz+=d*v.nz;any=true;}
+void Renderer::applySculpt(int mi,float wx,float wy,float wz,float radius,float intensity,float sign){
+    if(mi<0||mi>=(int)m_meshes.size())return;
+    auto&mo=m_meshes[mi];float r2=radius*radius;bool any=false;
+    for(auto&v:mo.vertices){float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;float w=gFall(dx*dx+dy*dy+dz*dz,r2);if(w<0.001f)continue;float d=sign*intensity*w;v.px+=d*v.nx;v.py+=d*v.ny;v.pz+=d*v.nz;any=true;}
     if(any){regenerateNormals(mo);updateMeshVBO(mo);}
 }
-
 // ── Raycasting ───────────────────────────────────────────────────────────────
 Renderer::Ray Renderer::screenToRay(float sx,float sy,float sw,float sh) const {
     float ndcX=(2.0f*sx/sw)-1.0f;

@@ -119,11 +119,10 @@ object NativeLib {
     /** Remove zero-area / degenerate triangles */
     external fun nativeRemoveZeroAreaFaces(meshIdx: Int): Int
 
-    external fun nativeApplySmooth(meshIdx: Int, wx: Float, wy: Float, wz: Float, radius: Float, intensity: Float)
-    external fun nativeApplySculpt(meshIdx: Int, wx: Float, wy: Float, wz: Float, radius: Float, intensity: Float, sign: Float)
-    external fun nativeExportPLY(path: String): Boolean
-    external fun nativeCombineMeshes(indices: IntArray): Boolean
-    external fun nativeSetMeshScaleMMDirect(meshIdx: Int, w: Float, h: Float, d: Float)
+    external fun nativeApplySmooth(meshIdx:Int,wx:Float,wy:Float,wz:Float,radius:Float,intensity:Float)
+    external fun nativeApplySculpt(meshIdx:Int,wx:Float,wy:Float,wz:Float,radius:Float,intensity:Float,sign:Float)
+    external fun nativeExportPLY(path:String):Boolean
+    external fun nativeCombineMeshes(indices:IntArray):Boolean
 
     init { System.loadLibrary("modelviewer") }
 }

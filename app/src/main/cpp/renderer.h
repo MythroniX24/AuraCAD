@@ -73,8 +73,8 @@ struct RingState {
     std::vector<Vertex> origVerts;
 };
 
-struct Frustum { float planes[6][4]; };
-struct BrushState { bool active=false,isSculpt=false; float radius=0.05f,intensity=0.5f,hitX=0,hitY=0,hitZ=0; int hitMesh=-1; };
+struct Frustum{float planes[6][4];};
+struct BrushState{bool active=false,isSculpt=false;float radius=0.05f,intensity=0.5f,hitX=0,hitY=0,hitZ=0;int hitMesh=-1;};
 
 class Renderer {
 public:
@@ -163,7 +163,7 @@ public:
 
     // Export
     Frustum buildFrustum() const;
-    bool frustumSphereTest(const Frustum& f,float cx,float cy,float cz,float r) const;
+    bool frustumSphereTest(const Frustum&f,float cx,float cy,float cz,float r)const;
     void applySmooth(int idx,float wx,float wy,float wz,float radius,float intensity);
     void applySculpt(int idx,float wx,float wy,float wz,float radius,float intensity,float sign);
     bool exportOBJ(const std::string& path) const;
@@ -255,8 +255,8 @@ private:
     // Production-grade mesh separator (reusable, preallocates buffers)
     MeshSeparator m_separator;
     BrushState m_brush;
-    Frustum   m_lastFrustum;
-    void buildMeshAdjacency(const MeshObject& mo,std::vector<std::vector<uint32_t>>& adj) const;
+    Frustum m_lastFrustum;
+    void buildMeshAdjacency(const MeshObject&mo,std::vector<std::vector<uint32_t>>&adj)const;
 
     // Ring deformation state
     RingState m_ring;

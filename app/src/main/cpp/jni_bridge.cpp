@@ -444,6 +444,6 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeRemoveZeroAreaFace
     return (jint)g_renderer->removeZeroAreaFaces((int)idx);
 }
 
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySmooth(JNIEnv*,jclass,jint idx,jfloat wx,jfloat wy,jfloat wz,jfloat r,jfloat i){LOCK_OR_VOID();g_renderer->applySmooth((int)idx,wx,wy,wz,r,i);}
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySculpt(JNIEnv*,jclass,jint idx,jfloat wx,jfloat wy,jfloat wz,jfloat r,jfloat i,jfloat s){LOCK_OR_VOID();g_renderer->applySculpt((int)idx,wx,wy,wz,r,i,s);}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySmooth(JNIEnv*,jclass,jint mi,jfloat wx,jfloat wy,jfloat wz,jfloat r,jfloat i){LOCK_OR_VOID();g_renderer->applySmooth(mi,wx,wy,wz,r,i);}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySculpt(JNIEnv*,jclass,jint mi,jfloat wx,jfloat wy,jfloat wz,jfloat r,jfloat i,jfloat s){LOCK_OR_VOID();g_renderer->applySculpt(mi,wx,wy,wz,r,i,s);}
 } // extern "C"
