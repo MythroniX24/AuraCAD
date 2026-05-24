@@ -90,36 +90,16 @@ class ModelGLSurfaceView @JvmOverloads constructor(
 
     fun attachRenderer(renderer: ModelRenderer) {
         setRenderer(renderer)
-        renderMode = RENDERMODE_WHEN_DIRTY
+        renderMode = RENDERMODE_CONTINUOUSLY
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        // ── Brush drag sculpting ──────────────────────────────────────────────
-        val _ma = context as? MainActivity
-        if (_ma?.activeTool?.name == "BRUSH") {
-            val _action = event.actionMasked
-            if (_action == android.view.MotionEvent.ACTION_DOWN ||
-                _action == android.view.MotionEvent.ACTION_MOVE) {
-                val _bf = _ma.supportFragmentManager
-                    .findFragmentByTag(BrushToolFragment.TAG) as? BrushToolFragment
-                if (_bf != null) {
-                    val _ex=event.x; val _ey=event.y
-                    val _sw=width.toFloat(); val _sh=height.toFloat()
-                    queueEvent {
-                        val pt = NativeLib.nativePickPoint(_ex, _ey, _sw, _sh)
-                        if (pt != null && pt.size >= 3) _bf.applyBrushAt(pt[0], pt[1], pt[2])
-                    }
-                    requestRender()
-                }
-            }
-        }
-        requestRender()
         // Scale detector MUST get the event first — it sets isScaling
         scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
 
-        if (mode == Mode.RULER) return true
-
+        // RULER mode: single-tap is handled via gestureDetector.onSingleTapConfirmed
+        // Camera rotation/pan/zoom still works normally in RULER mode
         val count = event.pointerCount
         when (event.actionMasked) {
 

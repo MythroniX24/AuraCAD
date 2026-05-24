@@ -187,7 +187,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             onChange  = { v ->
                 if (ringAnalyzed && v != lastBWMM) {
                     lastBWMM = v
-                    glRun { NativeLib.nativeSetRingBandWidth(v) }
+                    glRun { NativeLib.nativeSetRingBandWidthAsync(v) }
                     activity?.runOnUiThread {
                         updateBwInfo(v)
                         // Notify EditorPanel to refresh its dimension display
@@ -212,7 +212,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             onChange  = { v ->
                 if (ringAnalyzed && v != lastIDMM) {
                     lastIDMM = v
-                    glRun { NativeLib.nativeSetRingInnerDiameter(v) }
+                    glRun { NativeLib.nativeSetRingInnerDiameterAsync(v) }
                     activity?.runOnUiThread {
                         updateIdInfo(v)
                         activity?.sendBroadcast(

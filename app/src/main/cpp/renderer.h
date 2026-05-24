@@ -166,6 +166,7 @@ public:
     bool frustumSphereTest(const Frustum&f,float cx,float cy,float cz,float r)const;
     void applySmooth(int idx,float wx,float wy,float wz,float radius,float intensity);
     void applySculpt(int idx,float wx,float wy,float wz,float radius,float intensity,float sign);
+    float getNormalizeScale() const { return m_normalizeScale; }
     bool exportOBJ(const std::string& path) const;
     bool exportSTL(const std::string& path) const;
 
@@ -260,4 +261,11 @@ private:
 
     // Ring deformation state
     RingState m_ring;
+
+    // Non-blocking ring deformation — set from JNI, applied in draw()
+    volatile float m_pendingBW   = -1.f;
+    volatile float m_pendingID   = -1.f;
+    volatile bool  m_ringDirty   = false;
+
+    void applyPendingRingDeformation();
 };

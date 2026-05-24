@@ -63,23 +63,20 @@ class MainActivity : AppCompatActivity() {
     private var btnToolMove:   View? = null
     private var btnToolRotate: View? = null
     private var btnToolScale:  View? = null
-    private var btnToolBrush: View? = null
     private var btnToolRing:   View? = null
 
     private var icToolSelect: ImageView? = null
     private var icToolMove:   ImageView? = null
     private var icToolRotate: ImageView? = null
     private var icToolScale:  ImageView? = null
-    private var icToolBrush:  android.widget.ImageView? = null
     private var icToolRing:   ImageView? = null
     private var lblToolSelect: TextView? = null
     private var lblToolMove:   TextView? = null
     private var lblToolRotate: TextView? = null
     private var lblToolScale:  TextView? = null
-    private var lblToolBrush: android.widget.TextView? = null
     private var lblToolRing:   TextView? = null
 
-    internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING , BRUSH }
+    internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING  }
     internal var activeTool: Tool = Tool.NONE
     private var selectedMeshIdx: Int = -1
 
@@ -124,19 +121,16 @@ class MainActivity : AppCompatActivity() {
             btnToolRotate = findViewById(R.id.btnToolRotate)
             btnToolScale  = findViewById(R.id.btnToolScale)
             btnToolRing   = findViewById(R.id.btnToolRing)
-            btnToolBrush  = findViewById(R.id.btnToolBrush)
             icToolSelect = findViewById(R.id.icToolSelect)
             icToolMove   = findViewById(R.id.icToolMove)
             icToolRotate = findViewById(R.id.icToolRotate)
             icToolScale  = findViewById(R.id.icToolScale)
             icToolRing   = findViewById(R.id.icToolRing)
-            icToolBrush  = btnToolBrush?.findViewById(R.id.icToolBrush)
             lblToolSelect = findViewById(R.id.lblToolSelect)
             lblToolMove   = findViewById(R.id.lblToolMove)
             lblToolRotate = findViewById(R.id.lblToolRotate)
             lblToolScale  = findViewById(R.id.lblToolScale)
             lblToolRing   = findViewById(R.id.lblToolRing)
-            lblToolBrush  = btnToolBrush?.findViewById<android.widget.TextView>(R.id.lblToolBrush)
 
             renderer = ModelRenderer()
             renderer.onFpsUpdate = { fps ->
@@ -175,7 +169,6 @@ class MainActivity : AppCompatActivity() {
             btnToolRotate?.setOnClickListener { onToolClicked(Tool.ROTATE) }
             btnToolScale ?.setOnClickListener { onToolClicked(Tool.SCALE)  }
             btnToolRing  ?.setOnClickListener { onToolClicked(Tool.RING)
-            btnToolBrush ?.setOnClickListener { onToolClicked(Tool.BRUSH) }   }
 
             // ── Selection chip ───────────────────────────────────────────────
             findViewById<View?>(R.id.btnSelectionClear)?.setOnClickListener { clearSelection() }
@@ -292,7 +285,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             Tool.RING  -> { openRingTool() }
-            Tool.BRUSH -> { openBrushTool() }
             Tool.NONE  -> { /* deactivated */ }
         }
     }
@@ -303,8 +295,7 @@ class MainActivity : AppCompatActivity() {
             Triple(btnToolMove,   icToolMove,   lblToolMove  ) to (activeTool == Tool.MOVE),
             Triple(btnToolRotate, icToolRotate, lblToolRotate) to (activeTool == Tool.ROTATE),
             Triple(btnToolScale,  icToolScale,  lblToolScale ) to (activeTool == Tool.SCALE),
-            Triple(btnToolRing,   icToolRing,   lblToolRing  ) to (activeTool == Tool.RING),
-            Triple(btnToolBrush,  icToolBrush,  lblToolBrush ) to (activeTool == Tool.BRUSH)
+            Triple(btnToolRing,   icToolRing,   lblToolRing  ) to (activeTool == Tool.RING)
         )
         val activeBg     = ContextCompat.getDrawable(this, R.drawable.bg_tool_button_active)
         val idleBg       = ContextCompat.getDrawable(this, R.drawable.bg_tool_button)
@@ -420,18 +411,26 @@ class MainActivity : AppCompatActivity() {
                 glView.queueEvent { NativeLib.nativeSetRulerPoints(true, p1, true, p2) }
                 lifecycleScope.launch(Dispatchers.Default) {
                     val dx = p2[0]-p1[0]; val dy = p2[1]-p1[1]; val dz = p2[2]-p1[2]
-                    val distW = sqrt((dx*dx+dy*dy+dz*dz).toDouble()).toFloat()
-                    var maxMM = 100f
-                    val latch = CountDownLatch(1)
+                    val distNorm = sqrt((dx*dx+dy*dy+dz*dz).toDouble()).toFloat()
+                    // distNorm is in normalized renderer space.
+                    // normalizeScale = (1 / maxModelDimMM), so:
+                    // distMM = distNorm / normalizeScale
+                    var normScale = 1f
+                    val latch = java.util.concurrent.CountDownLatch(1)
                     glView.queueEvent {
-                        try { val s=NativeLib.nativeGetModelSizeMM(); maxMM=maxOf(s[3],s[4],s[5]) }
+                        try { normScale = NativeLib.nativeGetNormalizeScale() }
                         catch(_:Exception){}
                         latch.countDown()
                     }
-                    withContext(Dispatchers.IO) { latch.await() }
-                    val distMM = distW * (if (maxMM>0.001f) maxMM/2f else 1f)
-                    withContext(Dispatchers.Main) {
-                        tvRulerInfo?.text = "📏 %.2f mm  (%.2f cm)".format(distMM, distMM/10f)
+                    withContext(kotlinx.coroutines.Dispatchers.IO) { latch.await() }
+                    val distMM = if (normScale > 1e-9f) distNorm / normScale else distNorm * 100f
+                    withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        val txt = when {
+                            distMM >= 10f -> "📏 %.2f mm  (%.2f cm)".format(distMM, distMM/10f)
+                            else          -> "📏 %.3f mm".format(distMM)
+                        }
+                        tvRulerInfo?.text = txt
+                        rulerOverlay?.visibility = android.view.View.VISIBLE
                     }
                 }
             }
@@ -712,10 +711,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────
-    internal fun openBrushTool() {
-        if (supportFragmentManager.findFragmentByTag(BrushToolFragment.TAG) != null) return
-        BrushToolFragment.newInstance().show(supportFragmentManager, BrushToolFragment.TAG)
-    }
     private fun openMoveTool() {
         if (supportFragmentManager.findFragmentByTag(MoveToolFragment.TAG) != null) return
         MoveToolFragment.newInstance().show(supportFragmentManager, MoveToolFragment.TAG)

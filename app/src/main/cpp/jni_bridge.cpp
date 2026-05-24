@@ -444,6 +444,24 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeRemoveZeroAreaFace
     return (jint)g_renderer->removeZeroAreaFaces((int)idx);
 }
 
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySmooth(JNIEnv*,jclass,jint mi,jfloat wx,jfloat wy,jfloat wz,jfloat r,jfloat i){LOCK_OR_VOID();g_renderer->applySmooth(mi,wx,wy,wz,r,i);}
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySculpt(JNIEnv*,jclass,jint mi,jfloat wx,jfloat wy,jfloat wz,jfloat r,jfloat i,jfloat s){LOCK_OR_VOID();g_renderer->applySculpt(mi,wx,wy,wz,r,i,s);}
+JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScale(JNIEnv*,jclass){
+    LOCK_OR_FALSE(); return g_renderer ? g_renderer->getNormalizeScale() : 1.f;
+}
+
+// ── Non-blocking ring deformation setters ─────────────────────────────────────
+// These return instantly and schedule the actual deformation for the next draw()
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidthAsync(
+    JNIEnv*,jclass,jfloat v) {
+    if (g_renderer) {
+        g_renderer->m_pendingBW = v;
+        g_renderer->m_ringDirty = true;
+    }
+}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiameterAsync(
+    JNIEnv*,jclass,jfloat v) {
+    if (g_renderer) {
+        g_renderer->m_pendingID = v;
+        g_renderer->m_ringDirty = true;
+    }
+}
 } // extern "C"

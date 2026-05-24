@@ -104,6 +104,10 @@ object NativeLib {
     // ── Ring Deformation Tools ────────────────────────────────────────────────
     external fun nativeAnalyzeRing(meshIdx: Int): Boolean
     external fun nativeGetRingParams(): FloatArray
+    /** Non-blocking — schedules deformation for next draw() frame, no UI freeze */
+    external fun nativeSetRingBandWidthAsync(widthMM: Float)
+    /** Non-blocking — schedules deformation for next draw() frame, no UI freeze */
+    external fun nativeSetRingInnerDiameterAsync(diamMM: Float)
     external fun nativeSetRingBandWidth(widthMM: Float)
     external fun nativeSetRingInnerDiameter(diamMM: Float)
     external fun nativeResetRingDeformation()
@@ -119,10 +123,10 @@ object NativeLib {
     /** Remove zero-area / degenerate triangles */
     external fun nativeRemoveZeroAreaFaces(meshIdx: Int): Int
 
-    external fun nativeApplySmooth(meshIdx:Int,wx:Float,wy:Float,wz:Float,radius:Float,intensity:Float)
-    external fun nativeApplySculpt(meshIdx:Int,wx:Float,wy:Float,wz:Float,radius:Float,intensity:Float,sign:Float)
     external fun nativeExportPLY(path:String):Boolean
     external fun nativeCombineMeshes(indices:IntArray):Boolean
+
+    external fun nativeGetNormalizeScale(): Float
 
     init { System.loadLibrary("modelviewer") }
 }
