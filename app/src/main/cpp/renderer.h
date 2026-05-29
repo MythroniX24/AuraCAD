@@ -3,6 +3,7 @@
 #include <vector>
 #include <string>
 #include <cstdint>
+#include <atomic>
 #include "math_utils.h"
 #include "model_loader.h"
 #include "mesh_separator.h"
@@ -29,8 +30,8 @@ struct MeshObject {
     bool  visible=true;
     bool  selected=false;
 
-    // Per-mesh local-space bounding box, computed in uploadMeshObject().
-    // Used to draw a tight selection-overlay box and for per-mesh ray-pick.
+    // Per-mesh local-space bounding box, computed in uploadMeshObject()
+    // and kept up-to-date by recomputeBounds() after every deformation.
     float bboxMin[3] = { 0.f, 0.f, 0.f };
     float bboxMax[3] = { 0.f, 0.f, 0.f };
 };
@@ -62,7 +63,7 @@ struct RingState {
     float outerR      = 0.0f;   // legacy compat
     float heightAx    = 0.0f;
 
-    // Live tracking of current deformation state
+    // Live tracking of current deformation state (normalized units)
     float currentInnerR = 0.0f;
     float currentOuterR = 0.0f;
 
@@ -130,9 +131,6 @@ public:
     int  getMeshVertexCount(int idx) const;
 
     // ── Per-mesh independent transforms (Phase 2) ─────────────────────────────
-    // Apply rotation/translation to a single mesh — does NOT touch other meshes
-    // or the global transform.  Designed for the editor's Transform Tool which
-    // lets the user manipulate the long-pressed mesh in isolation.
     void setMeshRotation   (int idx, float rx, float ry, float rz);
     void setMeshTranslation(int idx, float px, float py, float pz);
     /** out9 = [rx,ry,rz, px,py,pz, sx,sy,sz] — empty/identity if idx invalid */
@@ -148,15 +146,13 @@ public:
     int  weldVertices(int meshIdx, float epsilonMM);       // merge close verts
     int  removeZeroAreaFaces(int meshIdx);                 // remove degenerate tris
 
-    // Ring deformation tools
-    bool  analyzeRing(int meshIdx);                     // Call from GL thread
-    bool  getRingParams(float out[6]) const;            // [innerRadMM, outerRadMM, bwMM, innerDiaMM, outerDiaMM, heightMM]
-    void  setRingBandWidth(float newWidthMM);           // GL thread
-    void  setRingInnerDiameter(float newDiamMM);        // GL thread
-    void  resetRingDeformation();                        // GL thread
+    // Ring deformation tools (all GL-thread)
+    bool  analyzeRing(int meshIdx);
+    bool  getRingParams(float out[6]) const;   // [innerRadMM, outerRadMM, bwMM, innerDiaMM, outerDiaMM, heightMM]
+    void  setRingBandWidth(float newWidthMM);
+    void  setRingInnerDiameter(float newDiamMM);
+    void  resetRingDeformation();
     bool  isRingAnalyzed() const { return m_ring.valid; }
-
-    // Separation helpers — called from JNI bridge (implementations in renderer.cpp)
 
     // Export
     bool exportOBJ(const std::string& path) const;
@@ -209,7 +205,6 @@ private:
     ModelData*              m_pendingData  = nullptr;
 
     // Raw vertex/index data kept alive for separation (safe to read from IO thread)
-    // Set in uploadParsed(), cleared after performSeparationGPU()
     std::vector<Vertex>       m_rawVertices;
     std::vector<unsigned int> m_rawIndices;
 
@@ -243,19 +238,53 @@ private:
     bool rayTriangle(const Ray& r,const Vec3& v0,const Vec3& v1,const Vec3& v2,float& t) const;
     void regenerateNormals(MeshObject& mo);
     void updateMeshVBO(MeshObject& mo);
-    void applyRingDeformation(float newInnerN, float newOuterN);
+
+    // ── Ring deformation helpers ──────────────────────────────────────────────
+    // recomputeBounds: rebuild bboxMin/bboxMax from current mo.vertices.
+    // Must be called after any operation that modifies vertex positions
+    // (ring deformation, decimation, weld, cleanup).
+    void recomputeBounds(MeshObject& mo);
+
+    // applyCombinedRingDeformation: THE authoritative deformation entry point.
+    // Always operates on m_ring.origVerts and applies BOTH bwMM and idMM
+    // simultaneously in a single radial-map pass, so neither parameter can
+    // silently override the other.  Updates currentInnerR/currentOuterR,
+    // regenerates normals, uploads VBO, and rebuilds the bounding box.
+    void applyCombinedRingDeformation(float bwMM, float idMM);
 
     // Production-grade mesh separator (reusable, preallocates buffers)
     MeshSeparator m_separator;
 
-    // Ring deformation state
+    // ── Ring deformation state ────────────────────────────────────────────────
     RingState m_ring;
-    volatile float m_pendingBW = -1.f;
-    volatile float m_pendingID = -1.f;
-    volatile bool  m_ringDirty = false;
+
+    // Full desired deformation state (mm units, GL thread only).
+    // Initialized in analyzeRing() to original values.
+    // Updated by setRingBandWidth / setRingInnerDiameter / applyPendingRingDeformation.
+    // Always applied together via applyCombinedRingDeformation so neither
+    // parameter can shadow the other.
+    float m_desiredBWmm = 0.f;
+    float m_desiredIDmm = 0.f;
+
+    // Pending async values posted from the UI thread.
+    // Atomic so the UI thread can write without holding g_renderMtx while the
+    // GL thread may simultaneously be inside draw().  applyPendingRingDeformation
+    // exchanges them to -1 after consuming.
+    std::atomic<float> m_pendingBW{-1.f};
+    std::atomic<float> m_pendingID{-1.f};
+    std::atomic<bool>  m_ringDirty{false};
     void applyPendingRingDeformation();
+
 public:
     float getNormalizeScale() const { return m_normalizeScale; }
-    void  setPendingBandWidth(float v)     { m_pendingBW=v; m_ringDirty=true; }
-    void  setPendingInnerDiameter(float v) { m_pendingID=v; m_ringDirty=true; }
+
+    // Called from UI thread (without g_renderMtx held) — atomic writes only.
+    void setPendingBandWidth(float v) {
+        m_pendingBW.store(v, std::memory_order_relaxed);
+        m_ringDirty.store(true, std::memory_order_release);
+    }
+    void setPendingInnerDiameter(float v) {
+        m_pendingID.store(v, std::memory_order_relaxed);
+        m_ringDirty.store(true, std::memory_order_release);
+    }
 };

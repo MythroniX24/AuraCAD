@@ -444,7 +444,26 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeRemoveZeroAreaFace
     return (jint)g_renderer->removeZeroAreaFaces((int)idx);
 }
 
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidthAsync(JNIEnv*,jclass,jfloat v){if(g_renderer)g_renderer->setPendingBandWidth((float)v);}
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiameterAsync(JNIEnv*,jclass,jfloat v){if(g_renderer)g_renderer->setPendingInnerDiameter((float)v);}
-JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScale(JNIEnv*,jclass){LOCK_OR_FALSE();return g_renderer?g_renderer->getNormalizeScale():1.f;}
+// ── Async ring-parameter setters ──────────────────────────────────────────────
+// These are called from the UI thread (SeekBar.onProgressChanged) on every
+// pixel of slider movement.  The renderer is only touched through atomic
+// stores inside setPendingBandWidth / setPendingInnerDiameter — no GL calls
+// are made — so holding g_renderMtx is safe and fast (never contended for
+// more than ~10 µs since draw() itself is the only other holder).
+//
+// IMPORTANT: we must hold g_renderMtx before dereferencing g_renderer.
+// The previous code accessed g_renderer without the lock, creating a data
+// race with nativeDestroy which resets the unique_ptr under the mutex.
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidthAsync(JNIEnv*,jclass,jfloat v){
+    LOCK_OR_VOID();
+    g_renderer->setPendingBandWidth((float)v);
+}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiameterAsync(JNIEnv*,jclass,jfloat v){
+    LOCK_OR_VOID();
+    g_renderer->setPendingInnerDiameter((float)v);
+}
+JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScale(JNIEnv*,jclass){
+    LOCK_RENDERER();
+    return (g_renderer) ? g_renderer->getNormalizeScale() : 1.f;
+}
 } // extern "C"

@@ -1698,6 +1698,19 @@ bool Renderer::analyzeRing(int meshIdx) {
     m_ring.origVerts     = mo.vertices;  // ← FULL backup, deformation always starts here
 
     float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
+
+    // ── Seed the desired-state record with the ring's original parameters.
+    // This is essential: if the user later moves only the BW slider, m_desiredIDmm
+    // must already hold the original inner diameter so applyCombinedRingDeformation
+    // can apply both parameters together without losing the other one.
+    m_desiredBWmm = (outerR - innerR) * toMM;   // original band width in mm
+    m_desiredIDmm = innerR * 2.f        * toMM; // original inner diameter in mm
+
+    // Clear any stale pending values left over from a previous ring session
+    m_pendingBW.store(-1.f, std::memory_order_relaxed);
+    m_pendingID.store(-1.f, std::memory_order_relaxed);
+    m_ringDirty.store(false, std::memory_order_relaxed);
+
     LOGI("Ring v3: innerR=%.3fmm outerR=%.3fmm band=%.3fmm h=%.3fmm axis=(%.3f,%.3f,%.3f) N=%zu borePts=%d",
          innerR*toMM, outerR*toMM, (outerR-innerR)*toMM, (axMax-axMin)*toMM,
          axisRefined.x, axisRefined.y, axisRefined.z, N, nBore);
@@ -1720,72 +1733,30 @@ bool Renderer::getRingParams(float out[6]) const {
     return true;
 }
 
-// ── Set band width (wall thickness) ──────────────────────────────────────────
-// Math: r_new = origInnerR + (r_orig - origInnerR) * scale
-//       scale = newBand / origBand
-// Effect: inner bore FIXED at origInnerR, outer wall moves to origInnerR + newBand
-// Texture: each vertex retains SAME FRACTIONAL position within the wall
-//          f = (r-innerR)/origBand  →  r_new = innerR + f*newBand
-//          Adjacent vertices: same f difference → no tearing
+// ── Set band width (wall thickness) — synchronous GL-thread API ──────────────
+// Updates the desired BW and applies the combined deformation so that the
+// current inner-diameter setting is preserved.  Delegates all math to
+// applyCombinedRingDeformation which is the single authoritative deformation
+// entry point.
 void Renderer::setRingBandWidth(float newWidthMM) {
     if (!m_ring.valid || m_ring.meshIdx < 0 ||
         m_ring.meshIdx >= (int)m_meshes.size()) return;
-    if (m_ring.origVerts.empty()) return;
-
-    float toNorm    = (m_normalizeScale > 1e-9f) ? m_normalizeScale : 1.f;
-    float newWidthN = newWidthMM * toNorm;
-    float origBandN = m_ring.origOuterR - m_ring.origInnerR;
-    if (newWidthN < 1e-9f || origBandN < 1e-9f) return;
-
-    float scale     = newWidthN / origBandN;
-    float innerFixed = m_ring.origInnerR;   // inner bore NEVER changes
-
-    auto& mo = m_meshes[m_ring.meshIdx];
-    const Vec3& cen  = m_ring.center;
-    const Vec3& axis = m_ring.axis;
-
-    // Linear scale from inner bore surface
-    applyRadialMap(mo, m_ring.origVerts, cen, axis,
-        [innerFixed, scale](float r) -> float {
-            float rRel = r - innerFixed;  // distance from inner bore
-            return innerFixed + rRel * scale;
-        });
-
-    m_ring.currentInnerR = m_ring.origInnerR;
-    m_ring.currentOuterR = m_ring.origInnerR + newWidthN;
-    regenerateNormals(mo);
-    updateMeshVBO(mo);
+    if (m_ring.origVerts.empty() || newWidthMM < 1e-9f) return;
+    m_desiredBWmm = newWidthMM;
+    applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm);
 }
 
-// ── Set inner diameter ────────────────────────────────────────────────────────
-// Math: r_new = r_orig + delta    where delta = newInnerR - origInnerR
-// Effect: UNIFORM radial shift of ALL vertices by the same delta
-//         outer radius also shifts by delta → outer diameter changes too
-//         This is correct: "ring size" is inner bore, everything else follows
-// Texture: r₁_new - r₂_new = (r₁+δ) - (r₂+δ) = r₁-r₂ → UNCHANGED → no tearing
+// ── Set inner diameter — synchronous GL-thread API ───────────────────────────
+// Updates the desired ID and applies the combined deformation so that the
+// current band-width setting is preserved.  Delegates all math to
+// applyCombinedRingDeformation which is the single authoritative deformation
+// entry point.
 void Renderer::setRingInnerDiameter(float newDiamMM) {
     if (!m_ring.valid || m_ring.meshIdx < 0 ||
         m_ring.meshIdx >= (int)m_meshes.size()) return;
-    if (m_ring.origVerts.empty()) return;
-
-    float toNorm    = (m_normalizeScale > 1e-9f) ? m_normalizeScale : 1.f;
-    float newInnerN = (newDiamMM * 0.5f) * toNorm;
-    float delta     = newInnerN - m_ring.origInnerR;  // positive = expand, negative = shrink
-
-    auto& mo = m_meshes[m_ring.meshIdx];
-    const Vec3& cen  = m_ring.center;
-    const Vec3& axis = m_ring.axis;
-
-    // Uniform radial shift — SAME delta for every vertex
-    applyRadialMap(mo, m_ring.origVerts, cen, axis,
-        [delta](float r) -> float {
-            return std::max(r + delta, 1e-9f);  // guard against negative radius
-        });
-
-    m_ring.currentInnerR = newInnerN;
-    m_ring.currentOuterR = m_ring.origOuterR + delta;  // outer shifts by same delta
-    regenerateNormals(mo);
-    updateMeshVBO(mo);
+    if (m_ring.origVerts.empty() || newDiamMM < 1e-9f) return;
+    m_desiredIDmm = newDiamMM;
+    applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm);
 }
 
 // ── Reset to original shape ───────────────────────────────────────────────────
@@ -1793,28 +1764,124 @@ void Renderer::resetRingDeformation() {
     if (!m_ring.valid || m_ring.meshIdx < 0 ||
         m_ring.meshIdx >= (int)m_meshes.size()) return;
     if (m_ring.origVerts.empty()) return;
+
     auto& mo = m_meshes[m_ring.meshIdx];
-    mo.vertices      = m_ring.origVerts;
+    mo.vertices          = m_ring.origVerts;
     m_ring.currentInnerR = m_ring.origInnerR;
     m_ring.currentOuterR = m_ring.origOuterR;
+
+    // Reset desired state back to original ring parameters so that
+    // subsequent slider moves start from the correct baseline
+    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
+    m_desiredBWmm = (m_ring.origOuterR - m_ring.origInnerR) * toMM;
+    m_desiredIDmm =  m_ring.origInnerR * 2.f                * toMM;
+
+    // Discard any in-flight pending values so the next draw() doesn't
+    // immediately re-apply a stale deformation on top of the reset
+    m_pendingBW.store(-1.f, std::memory_order_relaxed);
+    m_pendingID.store(-1.f, std::memory_order_relaxed);
+    m_ringDirty.store(false, std::memory_order_relaxed);
+
     regenerateNormals(mo);
     updateMeshVBO(mo);
+    recomputeBounds(mo);   // keep selection overlay in sync
 }
 
-// ── applyRingDeformation (stub — kept for header compat, delegates above) ─────
-void Renderer::applyRingDeformation(float newInnerN, float newOuterN) {
-    // This entry point is no longer used; Band/InnerDia APIs call directly.
-    // Kept to satisfy the header declaration.
-    (void)newInnerN; (void)newOuterN;
+// applyRingDeformation removed — declaration dropped from header.
+// All callers use setRingBandWidth / setRingInnerDiameter or the
+// async pending path which converges on applyCombinedRingDeformation.
+
+
+// ── Bounding-box rebuild ───────────────────────────────────────────────────────
+// Must be called after ANY operation that modifies vertex positions so that
+// the selection overlay, ray-pick AABB test, and mesh-stats display stay correct.
+void Renderer::recomputeBounds(MeshObject& mo) {
+    if (mo.vertices.empty()) return;
+    float mnX = FLT_MAX, mnY = FLT_MAX, mnZ = FLT_MAX;
+    float mxX = -FLT_MAX, mxY = -FLT_MAX, mxZ = -FLT_MAX;
+    for (const auto& v : mo.vertices) {
+        mnX = std::min(mnX, v.px); mxX = std::max(mxX, v.px);
+        mnY = std::min(mnY, v.py); mxY = std::max(mxY, v.py);
+        mnZ = std::min(mnZ, v.pz); mxZ = std::max(mxZ, v.pz);
+    }
+    mo.bboxMin[0] = mnX; mo.bboxMin[1] = mnY; mo.bboxMin[2] = mnZ;
+    mo.bboxMax[0] = mxX; mo.bboxMax[1] = mxY; mo.bboxMax[2] = mxZ;
 }
 
+// ── Combined ring deformation ─────────────────────────────────────────────────
+// This is THE single authoritative deformation entry point.
+//
+// CRITICAL DESIGN NOTE:
+// The old code applied BW and ID separately from origVerts, so the second
+// operation always overwrote the first (e.g. moving the ID slider would
+// silently undo any BW change because setRingInnerDiameter also starts from
+// origVerts).  This function fixes that by applying BOTH parameters in one
+// unified radial-map pass:
+//
+//   r_new = newInnerR + (r_orig - origInnerR) * bandScale
+//
+// where:
+//   newInnerR  = (desiredIDmm / 2) * normalizeScale  (shifted bore radius)
+//   bandScale  = desiredBWmm / origBandMM             (wall-thickness scale)
+//
+// Properties:
+//   • When only BW changed  → newInnerR == origInnerR, only wall scales
+//   • When only ID changed  → bandScale == 1,           pure uniform shift
+//   • When both changed     → bore shifts AND wall scales simultaneously
+//   • Always deforms from origVerts → zero cumulative error
+//   • After the map, bbox is rebuilt so the selection overlay is correct
+void Renderer::applyCombinedRingDeformation(float bwMM, float idMM) {
+    if (!m_ring.valid || m_ring.meshIdx < 0 ||
+        m_ring.meshIdx >= (int)m_meshes.size()) return;
+    if (m_ring.origVerts.empty() || bwMM < 1e-9f || idMM < 1e-9f) return;
 
+    float toNorm    = (m_normalizeScale > 1e-9f) ? m_normalizeScale : 1.f;
+    float newInnerN = (idMM * 0.5f) * toNorm;          // desired bore radius (norm)
+    float origBandN = m_ring.origOuterR - m_ring.origInnerR;
+    float newBandN  = bwMM * toNorm;
+    float bandScale = (origBandN > 1e-9f) ? (newBandN / origBandN) : 1.f;
+    float origInner = m_ring.origInnerR;
+
+    auto& mo = m_meshes[m_ring.meshIdx];
+
+    applyRadialMap(mo, m_ring.origVerts, m_ring.center, m_ring.axis,
+        [newInnerN, origInner, bandScale](float r) -> float {
+            float rRel = r - origInner;          // distance from original bore surface
+            float rNew = newInnerN + rRel * bandScale;
+            return (rNew > 1e-9f) ? rNew : 1e-9f; // guard against negative radius
+        });
+
+    m_ring.currentInnerR = newInnerN;
+    m_ring.currentOuterR = newInnerN + newBandN;
+
+    regenerateNormals(mo);
+    updateMeshVBO(mo);
+    recomputeBounds(mo);   // ← keeps selection-overlay bbox in sync
+}
+
+// ── Pending async deformation (called at top of draw() from GL thread) ────────
+// Consumes atomic pending values posted by setPendingBandWidth/InnerDiameter
+// from the UI thread, updates the full desired-state record, and calls
+// applyCombinedRingDeformation once with both parameters together.
+//
+// KEY FIX: we now track m_desiredBWmm and m_desiredIDmm across frames.
+// Updating only one slider only modifies that one field; the other retains
+// its previous value.  Both are forwarded to applyCombinedRingDeformation so
+// neither can silently cancel the other.
 void Renderer::applyPendingRingDeformation() {
-    if (!m_ringDirty) return;
-    float bw=m_pendingBW, id=m_pendingID;
-    m_ringDirty=false;
-    if (bw>0.f) { m_pendingBW=-1.f; setRingBandWidth(bw); }
-    if (id>0.f) { m_pendingID=-1.f; setRingInnerDiameter(id); }
+    if (!m_ringDirty.load(std::memory_order_acquire)) return;
+    m_ringDirty.store(false, std::memory_order_relaxed);
+
+    float bw = m_pendingBW.exchange(-1.f, std::memory_order_acquire);
+    float id = m_pendingID.exchange(-1.f, std::memory_order_acquire);
+
+    if (bw > 0.f) m_desiredBWmm = bw;
+    if (id > 0.f) m_desiredIDmm = id;
+
+    // Only act if the ring has been analyzed and desired state is valid
+    if (m_ring.valid && m_desiredBWmm > 0.f && m_desiredIDmm > 0.f) {
+        applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm);
+    }
 }
 
 // ── Raycasting ───────────────────────────────────────────────────────────────
