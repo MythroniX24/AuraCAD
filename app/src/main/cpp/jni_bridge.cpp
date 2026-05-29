@@ -466,4 +466,37 @@ JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScal
     LOCK_RENDERER();
     return (g_renderer) ? g_renderer->getNormalizeScale() : 1.f;
 }
+
+// ── Brush tools ───────────────────────────────────────────────────────────────
+// Laplacian smooth: for each vertex within [radius] mm of (cx,cy,cz), blend its
+// position towards the average of its immediate neighbours by [strength] (0-1).
+// Normals and VBO are rebuilt after the operation.
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySmooth(
+        JNIEnv*, jclass,
+        jint meshIdx, jfloat cx, jfloat cy, jfloat cz,
+        jfloat radius, jfloat strength)
+{
+    LOCK_OR_FALSE();
+    if (!g_renderer) return JNI_FALSE;
+    return g_renderer->applySmooth((int)meshIdx,
+                                   (float)cx, (float)cy, (float)cz,
+                                   (float)radius, (float)strength)
+           ? JNI_TRUE : JNI_FALSE;
+}
+
+// Sculpt brush: displaces every vertex within [radius] mm of (cx,cy,cz) along
+// its averaged normal by [amount] mm (positive = outward, negative = inward).
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySculpt(
+        JNIEnv*, jclass,
+        jint meshIdx, jfloat cx, jfloat cy, jfloat cz,
+        jfloat radius, jfloat amount)
+{
+    LOCK_OR_FALSE();
+    if (!g_renderer) return JNI_FALSE;
+    return g_renderer->applySculpt((int)meshIdx,
+                                   (float)cx, (float)cy, (float)cz,
+                                   (float)radius, (float)amount)
+           ? JNI_TRUE : JNI_FALSE;
+}
+
 } // extern "C"

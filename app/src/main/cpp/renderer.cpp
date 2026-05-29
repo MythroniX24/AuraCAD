@@ -1391,6 +1391,114 @@ int Renderer::removeZeroAreaFaces(int meshIdx) {
 
 
 // ══════════════════════════════════════════════════════════════════════════════
+// BRUSH TOOLS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── applySmooth ───────────────────────────────────────────────────────────────
+// Laplacian smoothing brush.  For every vertex of mesh [meshIdx] whose distance
+// from (cx,cy,cz) in normalised space is <= radius*normalizeScale, the vertex
+// position is blended towards the average of its ring-1 neighbours weighted by
+// [strength] (0-1).  A falloff curve (cos²) is applied so the effect is smooth
+// at the brush boundary.
+bool Renderer::applySmooth(int meshIdx, float cx, float cy, float cz,
+                           float radius, float strength)
+{
+    if (meshIdx < 0 || meshIdx >= (int)m_meshes.size()) return false;
+    auto& mo = m_meshes[meshIdx];
+    const size_t N = mo.vertices.size();
+    if (N < 3 || mo.indices.empty()) return false;
+
+    // Build adjacency: for each vertex, collect its neighbour indices.
+    std::vector<std::vector<uint32_t>> adj(N);
+    const size_t nTri = mo.indices.size() / 3;
+    for (size_t t = 0; t < nTri; ++t) {
+        uint32_t i0 = mo.indices[t*3+0];
+        uint32_t i1 = mo.indices[t*3+1];
+        uint32_t i2 = mo.indices[t*3+2];
+        adj[i0].push_back(i1); adj[i0].push_back(i2);
+        adj[i1].push_back(i0); adj[i1].push_back(i2);
+        adj[i2].push_back(i0); adj[i2].push_back(i1);
+    }
+
+    const float radiusSq = radius * radius;
+    std::vector<glm::vec3> newPos(N);
+    for (size_t i = 0; i < N; ++i) newPos[i] = mo.vertices[i].position;
+
+    for (size_t i = 0; i < N; ++i) {
+        const glm::vec3& p = mo.vertices[i].position;
+        float dx = p.x - cx, dy = p.y - cy, dz = p.z - cz;
+        float distSq = dx*dx + dy*dy + dz*dz;
+        if (distSq > radiusSq || adj[i].empty()) continue;
+
+        // Cosine falloff: 1 at centre, 0 at edge
+        float t = 1.f - (distSq / radiusSq);
+        float w  = t * t * strength;
+
+        glm::vec3 avg(0,0,0);
+        // Deduplicate neighbours
+        auto& nbrs = adj[i];
+        std::sort(nbrs.begin(), nbrs.end());
+        nbrs.erase(std::unique(nbrs.begin(), nbrs.end()), nbrs.end());
+        for (uint32_t nb : nbrs) avg += mo.vertices[nb].position;
+        avg /= (float)nbrs.size();
+
+        newPos[i] = p + (avg - p) * w;
+    }
+
+    bool changed = false;
+    for (size_t i = 0; i < N; ++i) {
+        if (newPos[i] != mo.vertices[i].position) {
+            mo.vertices[i].position = newPos[i];
+            changed = true;
+        }
+    }
+    if (!changed) return false;
+
+    regenerateNormals(mo);
+    updateMeshVBO(mo);
+    recomputeBounds(mo);
+    return true;
+}
+
+// ── applySculpt ───────────────────────────────────────────────────────────────
+// Inflate/deflate brush.  Vertices within [radius] of (cx,cy,cz) are displaced
+// along their vertex normal by [amount] mm, attenuated by a cos² falloff.
+bool Renderer::applySculpt(int meshIdx, float cx, float cy, float cz,
+                           float radius, float amount)
+{
+    if (meshIdx < 0 || meshIdx >= (int)m_meshes.size()) return false;
+    auto& mo = m_meshes[meshIdx];
+    const size_t N = mo.vertices.size();
+    if (N < 3) return false;
+
+    const float radiusSq = radius * radius;
+    bool changed = false;
+
+    for (size_t i = 0; i < N; ++i) {
+        glm::vec3& p = mo.vertices[i].position;
+        float dx = p.x - cx, dy = p.y - cy, dz = p.z - cz;
+        float distSq = dx*dx + dy*dy + dz*dz;
+        if (distSq > radiusSq) continue;
+
+        float t = 1.f - (distSq / radiusSq);
+        float w = t * t;   // cos² falloff
+
+        glm::vec3 n = glm::normalize(mo.vertices[i].normal);
+        p += n * (amount * w);
+        changed = true;
+    }
+
+    if (!changed) return false;
+
+    regenerateNormals(mo);
+    updateMeshVBO(mo);
+    recomputeBounds(mo);
+    return true;
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════════════
 // RING DEFORMATION ENGINE
 // ══════════════════════════════════════════════════════════════════════════════
 

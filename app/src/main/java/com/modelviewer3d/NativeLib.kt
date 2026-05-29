@@ -125,5 +125,15 @@ object NativeLib {
     external fun nativeExportPLY(path: String): Boolean
     external fun nativeCombineMeshes(indices: IntArray): Boolean
 
+    // ── Brush Tools ───────────────────────────────────────────────────────────
+    /** Laplacian smooth brush: applies iterative smoothing within [radius] mm
+     *  around world-space point (cx,cy,cz) on [meshIdx]. [strength] in 0..1. */
+    external fun nativeApplySmooth(meshIdx: Int, cx: Float, cy: Float, cz: Float,
+                                   radius: Float, strength: Float): Boolean
+    /** Sculpt brush: displaces vertices within [radius] mm around world-space
+     *  point (cx,cy,cz) along their averaged normal by [amount] mm (±). */
+    external fun nativeApplySculpt(meshIdx: Int, cx: Float, cy: Float, cz: Float,
+                                   radius: Float, amount: Float): Boolean
+
     init { System.loadLibrary("modelviewer") }
 }

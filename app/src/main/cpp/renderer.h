@@ -146,6 +146,18 @@ public:
     int  weldVertices(int meshIdx, float epsilonMM);       // merge close verts
     int  removeZeroAreaFaces(int meshIdx);                 // remove degenerate tris
 
+    // ── Brush tools ───────────────────────────────────────────────────────────
+    // Both operate on the GL thread; they rebuild normals + update the VBO.
+    /** Laplacian smooth brush. Blends each vertex within [radius] mm of
+     *  world-space point (cx,cy,cz) towards its ring-1 neighbour average
+     *  by [strength] (0–1). */
+    bool applySmooth(int meshIdx, float cx, float cy, float cz,
+                     float radius, float strength);
+    /** Sculpt (inflate/deflate) brush. Displaces vertices within [radius] mm
+     *  of (cx,cy,cz) along their averaged normal by [amount] mm. */
+    bool applySculpt(int meshIdx, float cx, float cy, float cz,
+                     float radius, float amount);
+
     // Ring deformation tools (all GL-thread)
     bool  analyzeRing(int meshIdx);
     bool  getRingParams(float out[6]) const;   // [innerRadMM, outerRadMM, bwMM, innerDiaMM, outerDiaMM, heightMM]
