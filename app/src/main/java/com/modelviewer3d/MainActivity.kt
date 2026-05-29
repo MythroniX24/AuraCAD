@@ -93,6 +93,14 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Cleanup: delete any leftover 3D model files from cache (previous runs)
+        try {
+            cacheDir.listFiles()?.forEach { f ->
+                val ext = f.extension.lowercase()
+                if (ext in listOf("stl","obj","glb","gltf","ply","3mf","fbx","dae"))
+                    f.delete()
+            }
+        } catch (_: Exception) {}
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = 0x00000000
 
@@ -647,6 +655,17 @@ class MainActivity : AppCompatActivity() {
                 if (!hasKnownExtension(name)) name = "model.stl"
 
                 currentFileName = name
+                // Clear ALL previous model cache files to prevent storage bloat
+                cacheDir.listFiles()?.forEach { f ->
+                    if (f.name.endsWith(".stl",ignoreCase=true) ||
+                        f.name.endsWith(".obj",ignoreCase=true) ||
+                        f.name.endsWith(".glb",ignoreCase=true) ||
+                        f.name.endsWith(".gltf",ignoreCase=true) ||
+                        f.name.endsWith(".ply",ignoreCase=true) ||
+                        f.name.endsWith(".3mf",ignoreCase=true)) {
+                        f.delete()
+                    }
+                }
                 val dest = File(cacheDir, name)
 
                 // Copy URI content to local cache file (NIO fast transfer)

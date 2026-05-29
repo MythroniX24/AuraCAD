@@ -167,6 +167,9 @@ public:
     void applySmooth(int idx,float wx,float wy,float wz,float radius,float intensity);
     void applySculpt(int idx,float wx,float wy,float wz,float radius,float intensity,float sign);
     float getNormalizeScale() const { return m_normalizeScale; }
+    // Non-blocking async ring deformation setters (called from JNI without locking)
+    void  setPendingBandWidth(float v)     { m_pendingBW=v; m_ringDirty=true; }
+    void  setPendingInnerDiameter(float v) { m_pendingID=v; m_ringDirty=true; }
     bool exportOBJ(const std::string& path) const;
     bool exportSTL(const std::string& path) const;
 

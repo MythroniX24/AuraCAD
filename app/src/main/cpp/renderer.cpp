@@ -1,4 +1,9 @@
 #include "renderer.h"
+
+// Forward declaration — defined later in this file
+static inline Vec3 applyMat4Point(const Mat4& mat, float x, float y, float z);
+static inline Vec3 applyMat4Normal(const Mat4& mat, float x, float y, float z);
+
 #include "mesh_separator.h"
 #include "shader_utils.h"
 #include <android/log.h>

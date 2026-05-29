@@ -452,16 +452,10 @@ JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScal
 // These return instantly and schedule the actual deformation for the next draw()
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidthAsync(
     JNIEnv*,jclass,jfloat v) {
-    if (g_renderer) {
-        g_renderer->m_pendingBW = v;
-        g_renderer->m_ringDirty = true;
-    }
+    if (g_renderer) g_renderer->setPendingBandWidth((float)v);
 }
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiameterAsync(
     JNIEnv*,jclass,jfloat v) {
-    if (g_renderer) {
-        g_renderer->m_pendingID = v;
-        g_renderer->m_ringDirty = true;
-    }
+    if (g_renderer) g_renderer->setPendingInnerDiameter((float)v);
 }
 } // extern "C"
