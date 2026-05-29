@@ -73,9 +73,6 @@ struct RingState {
     std::vector<Vertex> origVerts;
 };
 
-struct Frustum{float planes[6][4];};
-struct BrushState{bool active=false,isSculpt=false;float radius=0.05f,intensity=0.5f,hitX=0,hitY=0,hitZ=0;int hitMesh=-1;};
-
 class Renderer {
 public:
     Renderer(); ~Renderer();
@@ -162,14 +159,6 @@ public:
     // Separation helpers — called from JNI bridge (implementations in renderer.cpp)
 
     // Export
-    Frustum buildFrustum() const;
-    bool frustumSphereTest(const Frustum&f,float cx,float cy,float cz,float r)const;
-    void applySmooth(int idx,float wx,float wy,float wz,float radius,float intensity);
-    void applySculpt(int idx,float wx,float wy,float wz,float radius,float intensity,float sign);
-    float getNormalizeScale() const { return m_normalizeScale; }
-    // Non-blocking async ring deformation setters (called from JNI without locking)
-    void  setPendingBandWidth(float v)     { m_pendingBW=v; m_ringDirty=true; }
-    void  setPendingInnerDiameter(float v) { m_pendingID=v; m_ringDirty=true; }
     bool exportOBJ(const std::string& path) const;
     bool exportSTL(const std::string& path) const;
 
@@ -258,17 +247,15 @@ private:
 
     // Production-grade mesh separator (reusable, preallocates buffers)
     MeshSeparator m_separator;
-    BrushState m_brush;
-    Frustum m_lastFrustum;
-    void buildMeshAdjacency(const MeshObject&mo,std::vector<std::vector<uint32_t>>&adj)const;
 
     // Ring deformation state
     RingState m_ring;
-
-    // Non-blocking ring deformation — set from JNI, applied in draw()
-    volatile float m_pendingBW   = -1.f;
-    volatile float m_pendingID   = -1.f;
-    volatile bool  m_ringDirty   = false;
-
+    volatile float m_pendingBW = -1.f;
+    volatile float m_pendingID = -1.f;
+    volatile bool  m_ringDirty = false;
     void applyPendingRingDeformation();
+public:
+    float getNormalizeScale() const { return m_normalizeScale; }
+    void  setPendingBandWidth(float v)     { m_pendingBW=v; m_ringDirty=true; }
+    void  setPendingInnerDiameter(float v) { m_pendingID=v; m_ringDirty=true; }
 };

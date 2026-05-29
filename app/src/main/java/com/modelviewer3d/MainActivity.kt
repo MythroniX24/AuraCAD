@@ -76,8 +76,8 @@ class MainActivity : AppCompatActivity() {
     private var lblToolScale:  TextView? = null
     private var lblToolRing:   TextView? = null
 
-    internal enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING  }
-    internal var activeTool: Tool = Tool.NONE
+    private enum class Tool { NONE, SELECT, MOVE, ROTATE, SCALE, RING }
+    private var activeTool: Tool = Tool.NONE
     private var selectedMeshIdx: Int = -1
 
     private var rulerPoint1: FloatArray? = null
@@ -93,14 +93,6 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // Cleanup: delete any leftover 3D model files from cache (previous runs)
-        try {
-            cacheDir.listFiles()?.forEach { f ->
-                val ext = f.extension.lowercase()
-                if (ext in listOf("stl","obj","glb","gltf","ply","3mf","fbx","dae"))
-                    f.delete()
-            }
-        } catch (_: Exception) {}
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = 0x00000000
 
@@ -176,7 +168,7 @@ class MainActivity : AppCompatActivity() {
             btnToolMove  ?.setOnClickListener { onToolClicked(Tool.MOVE)   }
             btnToolRotate?.setOnClickListener { onToolClicked(Tool.ROTATE) }
             btnToolScale ?.setOnClickListener { onToolClicked(Tool.SCALE)  }
-            btnToolRing  ?.setOnClickListener { onToolClicked(Tool.RING)
+            btnToolRing  ?.setOnClickListener { onToolClicked(Tool.RING)   }
 
             // ── Selection chip ───────────────────────────────────────────────
             findViewById<View?>(R.id.btnSelectionClear)?.setOnClickListener { clearSelection() }
@@ -281,9 +273,7 @@ class MainActivity : AppCompatActivity() {
                     toast("Long-press a mesh on the canvas to select it")
                 }
             }
-            Tool.MOVE   -> { openMoveTool() }
-            Tool.ROTATE -> { openRotateTool() }
-            Tool.SCALE  -> {
+            Tool.MOVE, Tool.ROTATE, Tool.SCALE -> {
                 if (selectedMeshIdx < 0) {
                     toast("Long-press a mesh on the canvas first, then choose a transform")
                     activeTool = Tool.NONE
@@ -292,8 +282,10 @@ class MainActivity : AppCompatActivity() {
                     findViewById<View>(R.id.btnMeshTools).performClick()
                 }
             }
-            Tool.RING  -> { openRingTool() }
-            Tool.NONE  -> { /* deactivated */ }
+            Tool.RING -> {
+                findViewById<View>(R.id.btnRingTool).performClick()
+            }
+            Tool.NONE -> { /* deactivated */ }
         }
     }
 
@@ -419,26 +411,25 @@ class MainActivity : AppCompatActivity() {
                 glView.queueEvent { NativeLib.nativeSetRulerPoints(true, p1, true, p2) }
                 lifecycleScope.launch(Dispatchers.Default) {
                     val dx = p2[0]-p1[0]; val dy = p2[1]-p1[1]; val dz = p2[2]-p1[2]
-                    val distNorm = sqrt((dx*dx+dy*dy+dz*dz).toDouble()).toFloat()
-                    // distNorm is in normalized renderer space.
-                    // normalizeScale = (1 / maxModelDimMM), so:
-                    // distMM = distNorm / normalizeScale
-                    var normScale = 1f
-                    val latch = java.util.concurrent.CountDownLatch(1)
+                    val distW = sqrt((dx*dx+dy*dy+dz*dz).toDouble()).toFloat()
+                    var maxMM = 100f
+                    val latch = CountDownLatch(1)
                     glView.queueEvent {
-                        try { normScale = NativeLib.nativeGetNormalizeScale() }
+                        try { val s=NativeLib.nativeGetModelSizeMM(); maxMM=maxOf(s[3],s[4],s[5]) }
                         catch(_:Exception){}
                         latch.countDown()
                     }
-                    withContext(kotlinx.coroutines.Dispatchers.IO) { latch.await() }
-                    val distMM = if (normScale > 1e-9f) distNorm / normScale else distNorm * 100f
-                    withContext(kotlinx.coroutines.Dispatchers.Main) {
-                        val txt = when {
-                            distMM >= 10f -> "📏 %.2f mm  (%.2f cm)".format(distMM, distMM/10f)
-                            else          -> "📏 %.3f mm".format(distMM)
-                        }
-                        tvRulerInfo?.text = txt
-                        rulerOverlay?.visibility = android.view.View.VISIBLE
+                    withContext(Dispatchers.IO) { latch.await() }
+                    val normScale = try {
+                        var ns = 1f
+                        val l2 = java.util.concurrent.CountDownLatch(1)
+                        glView.queueEvent { try { ns = NativeLib.nativeGetNormalizeScale() } finally { l2.countDown() } }
+                        withContext(kotlinx.coroutines.Dispatchers.IO) { l2.await(2, java.util.concurrent.TimeUnit.SECONDS) }
+                        ns
+                    } catch (e: Exception) { 1f }
+                    val distMM = if (normScale > 1e-9f) distW / normScale else distW * 100f
+                    withContext(Dispatchers.Main) {
+                        tvRulerInfo?.text = "📏 %.2f mm  (%.2f cm)".format(distMM, distMM/10f)
                     }
                 }
             }
@@ -655,17 +646,11 @@ class MainActivity : AppCompatActivity() {
                 if (!hasKnownExtension(name)) name = "model.stl"
 
                 currentFileName = name
-                // Clear ALL previous model cache files to prevent storage bloat
-                cacheDir.listFiles()?.forEach { f ->
-                    if (f.name.endsWith(".stl",ignoreCase=true) ||
-                        f.name.endsWith(".obj",ignoreCase=true) ||
-                        f.name.endsWith(".glb",ignoreCase=true) ||
-                        f.name.endsWith(".gltf",ignoreCase=true) ||
-                        f.name.endsWith(".ply",ignoreCase=true) ||
-                        f.name.endsWith(".3mf",ignoreCase=true)) {
-                        f.delete()
-                    }
-                }
+                // Delete old cached model files to prevent storage bloat
+                cacheDir.listFiles { f -> f.extension.lowercase() in
+                    setOf("stl","obj","glb","gltf","ply","3mf","fbx","dae") }
+                    ?.forEach { it.delete() }
+
                 val dest = File(cacheDir, name)
 
                 // Copy URI content to local cache file (NIO fast transfer)
@@ -730,19 +715,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────
-    private fun openMoveTool() {
-        if (supportFragmentManager.findFragmentByTag(MoveToolFragment.TAG) != null) return
-        MoveToolFragment.newInstance().show(supportFragmentManager, MoveToolFragment.TAG)
-    }
-    private fun openRotateTool() {
-        if (supportFragmentManager.findFragmentByTag(RotateToolFragment.TAG) != null) return
-        RotateToolFragment.newInstance().show(supportFragmentManager, RotateToolFragment.TAG)
-    }
-    private fun openMeshInfo() {
-        if (supportFragmentManager.findFragmentByTag(MeshInfoFragment.TAG) != null) return
-        MeshInfoFragment.newInstance().show(supportFragmentManager, MeshInfoFragment.TAG)
-    }
-        private fun openRingTool() {
+    private fun openRingTool() {
         if (supportFragmentManager.findFragmentByTag(RingToolFragment.TAG) != null) return
         RingToolFragment.newInstance().show(supportFragmentManager, RingToolFragment.TAG)
     }

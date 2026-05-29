@@ -1,9 +1,6 @@
 #include "renderer.h"
-
-// Forward declaration — defined later in this file
 static inline Vec3 applyMat4Point(const Mat4& mat, float x, float y, float z);
 static inline Vec3 applyMat4Normal(const Mat4& mat, float x, float y, float z);
-
 #include "mesh_separator.h"
 #include "shader_utils.h"
 #include <android/log.h>
@@ -323,8 +320,7 @@ Vec3 Renderer::cameraEye() const {
 // ── Draw ─────────────────────────────────────────────────────────────────────
 void Renderer::draw(){
     updateFPS();
-    applyPendingRingDeformation(); // Apply queued ring changes without UI freeze
-    m_lastFrustum=buildFrustum();
+    applyPendingRingDeformation();
     glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     if(m_meshes.empty()||!m_mainProg||!m_wireProg) return;
 
@@ -338,8 +334,6 @@ void Renderer::draw(){
 
     for(auto& mo:m_meshes){
         if(!mo.visible||!mo.gpuReady) continue;
-        // Frustum cull
-        {float cx=0.5f*(mo.bboxMin[0]+mo.bboxMax[0]),cy=0.5f*(mo.bboxMin[1]+mo.bboxMax[1]),cz=0.5f*(mo.bboxMin[2]+mo.bboxMax[2]),dx=mo.bboxMax[0]-mo.bboxMin[0],dy=mo.bboxMax[1]-mo.bboxMin[1],dz=mo.bboxMax[2]-mo.bboxMin[2];if(!frustumSphereTest(m_lastFrustum,cx,cy,cz,sqrtf(dx*dx+dy*dy+dz*dz)*0.6f))continue;}
         Mat4 meshMat = buildMeshMatrix(mo);
         Mat4 model   = global * meshMat;
         Mat4 mvp     = proj*view*model;
@@ -853,29 +847,23 @@ int Renderer::pickMesh(float sx, float sy, float sw, float sh){
 
 // ── Size ─────────────────────────────────────────────────────────────────────
 void Renderer::getModelSizeMM(float& w,float& h,float& d) const {
-    // Recompute from CURRENT vertex positions (ring deformation changes vertices)
-    if (m_meshes.empty()) { w=m_origWmm; h=m_origHmm; d=m_origDmm; return; }
-    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
-    float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX;
-    float mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
-    Mat4 global = buildGlobalMatrix();
-    for (const auto& mo : m_meshes) {
-        if (!mo.visible) continue;
-        Mat4 model = global * buildMeshMatrix(mo);
-        for (const auto& v : mo.vertices) {
-            Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
-            mnX=std::min(mnX,p.x); mxX=std::max(mxX,p.x);
-            mnY=std::min(mnY,p.y); mxY=std::max(mxY,p.y);
-            mnZ=std::min(mnZ,p.z); mxZ=std::max(mxZ,p.z);
-        }
-    }
-    if (mxX>mnX) { w=(mxX-mnX)*toMM; h=(mxY-mnY)*toMM; d=(mxZ-mnZ)*toMM; }
-    else { w=m_origWmm; h=m_origHmm; d=m_origDmm; }
+    if (m_meshes.empty()){w=m_origWmm;h=m_origHmm;d=m_origDmm;return;}
+    float toMM=(m_normalizeScale>1e-9f)?(1.f/m_normalizeScale):1.f;
+    float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX,mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
+    Mat4 global=buildGlobalMatrix();
+    for(const auto& mo:m_meshes){if(!mo.visible)continue;
+        Mat4 model=global*buildMeshMatrix(mo);
+        for(const auto& v:mo.vertices){
+            float px=model.m[0]*v.px+model.m[4]*v.py+model.m[8]*v.pz+model.m[12];
+            float py=model.m[1]*v.px+model.m[5]*v.py+model.m[9]*v.pz+model.m[13];
+            float pz=model.m[2]*v.px+model.m[6]*v.py+model.m[10]*v.pz+model.m[14];
+            mnX=std::min(mnX,px);mxX=std::max(mxX,px);
+            mnY=std::min(mnY,py);mxY=std::max(mxY,py);
+            mnZ=std::min(mnZ,pz);mxZ=std::max(mxZ,pz);}}
+    if(mxX>mnX){w=(mxX-mnX)*toMM;h=(mxY-mnY)*toMM;d=(mxZ-mnZ)*toMM;}
+    else{w=m_origWmm;h=m_origHmm;d=m_origDmm;}
 }
-void Renderer::getCurrentSizeMM(float& w,float& h,float& d) const {
-    // Delegate to getModelSizeMM which now computes from actual vertex positions
-    getModelSizeMM(w, h, d);
-}
+void Renderer::getCurrentSizeMM(float& w,float& h,float& d) const { getModelSizeMM(w,h,d); }
 
 // ── Export helpers ────────────────────────────────────────────────────────────
 // Transform a 3D point by a column-major 4x4 matrix (with perspective divide)
@@ -1591,316 +1579,132 @@ bool Renderer::analyzeRing(int meshIdx) {
     if (meshIdx < 0 || meshIdx >= (int)m_meshes.size()) return false;
     const MeshObject& mo = m_meshes[meshIdx];
     const size_t N = mo.vertices.size();
-    if (N < 128) return false;
+    if (N < 64) return false;
+
+    // ── Pass 1: crude centroid + covariance for initial axis ─────────────────
+    double cx = 0, cy = 0, cz = 0;
+    for (const auto& v : mo.vertices) { cx += v.px; cy += v.py; cz += v.pz; }
+    cx /= (double)N; cy /= (double)N; cz /= (double)N;
+    Vec3 cen0{(float)cx, (float)cy, (float)cz};
+
+    float C[3][3] = {};
+    for (const auto& v : mo.vertices) {
+        float d[3] = {v.px-(float)cx, v.py-(float)cy, v.pz-(float)cz};
+        for (int i=0;i<3;i++) for (int j=0;j<3;j++) C[i][j] += d[i]*d[j];
+    }
+    float Vmat[3][3];
+    jacobiEigen3(C, Vmat);
+    // Smallest eigenvalue → axis (least variance = through-hole direction)
+    Vec3 axis {Vmat[0][0], Vmat[1][0], Vmat[2][0]};
+    {
+        float alen = sqrtf(axis.x*axis.x + axis.y*axis.y + axis.z*axis.z);
+        if (alen < 1e-9f) return false;
+        axis.x /= alen; axis.y /= alen; axis.z /= alen;
+    }
+
+    // ── Pass 2: compute radial distances, find innerR via 5th percentile ─────
+    std::vector<float> radii(N);
+    float axMin = FLT_MAX, axMax = -FLT_MAX;
+    for (size_t i = 0; i < N; ++i) {
+        const auto& v = mo.vertices[i];
+        float dx = v.px-cen0.x, dy = v.py-cen0.y, dz = v.pz-cen0.z;
+        float along = dx*axis.x + dy*axis.y + dz*axis.z;
+        axMin = std::min(axMin, along); axMax = std::max(axMax, along);
+        float rx = dx-along*axis.x, ry = dy-along*axis.y, rz = dz-along*axis.z;
+        radii[i] = sqrtf(rx*rx + ry*ry + rz*rz);
+    }
+    std::vector<float> sortedR = radii;
+    std::sort(sortedR.begin(), sortedR.end());
+    float p05 = sortedR[(size_t)(N * 0.05)];  // inner bore radius estimate
+    float p95 = sortedR[(size_t)(N * 0.95)];  // outer surface radius estimate
+    if (p95 - p05 < 1e-7f) return false;
+
+    // ── Pass 3: refine centroid + axis using INNER BORE vertices ONLY ─────────
+    // Inner bore is a clean cylinder — texture only affects outer geometry.
+    // This makes axis detection immune to carved/embossed patterns.
+    float boreCut = p05 * 1.35f;  // inner bore: all verts with r < 135% of p05
+    double icx = 0, icy = 0, icz = 0;
+    int nBore = 0;
+    for (size_t i = 0; i < N; ++i) {
+        if (radii[i] <= boreCut) {
+            icx += mo.vertices[i].px;
+            icy += mo.vertices[i].py;
+            icz += mo.vertices[i].pz;
+            ++nBore;
+        }
+    }
+    Vec3 cen = cen0;  // default to crude centroid
+    Vec3 axisRefined = axis;
+
+    if (nBore >= 64) {
+        icx /= nBore; icy /= nBore; icz /= nBore;
+        Vec3 boreCen{(float)icx, (float)icy, (float)icz};
+
+        // Covariance from bore vertices only
+        float Cb[3][3] = {};
+        for (size_t i = 0; i < N; ++i) {
+            if (radii[i] > boreCut) continue;
+            float d[3] = {mo.vertices[i].px-(float)icx,
+                          mo.vertices[i].py-(float)icy,
+                          mo.vertices[i].pz-(float)icz};
+            for (int ii=0;ii<3;ii++) for (int jj=0;jj<3;jj++) Cb[ii][jj] += d[ii]*d[jj];
+        }
+        float Vb[3][3];
+        jacobiEigen3(Cb, Vb);
+        Vec3 axB{Vb[0][0], Vb[1][0], Vb[2][0]};
+        float abLen = sqrtf(axB.x*axB.x + axB.y*axB.y + axB.z*axB.z);
+        if (abLen > 1e-9f) {
+            axB.x /= abLen; axB.y /= abLen; axB.z /= abLen;
+            // Accept refined axis only if aligned within 30° of crude axis
+            float dot = fabsf(axB.x*axis.x + axB.y*axis.y + axB.z*axis.z);
+            if (dot > 0.866f) {  // cos(30°)
+                axisRefined = axB;
+                cen = boreCen;
+                LOGI("Ring: bore-refined axis & centroid from %d/%zu verts", nBore, N);
+            }
+        }
+    }
+
+    // ── Pass 4: recompute radii & percentiles with refined axis ──────────────
+    axMin = FLT_MAX; axMax = -FLT_MAX;
+    for (size_t i = 0; i < N; ++i) {
+        const auto& v = mo.vertices[i];
+        float dx = v.px-cen.x, dy = v.py-cen.y, dz = v.pz-cen.z;
+        float along = dx*axisRefined.x + dy*axisRefined.y + dz*axisRefined.z;
+        axMin = std::min(axMin, along); axMax = std::max(axMax, along);
+        float rx = dx-along*axisRefined.x, ry = dy-along*axisRefined.y, rz = dz-along*axisRefined.z;
+        radii[i] = sqrtf(rx*rx + ry*ry + rz*rz);
+    }
+    std::copy(radii.begin(), radii.end(), sortedR.begin());
+    std::sort(sortedR.begin(), sortedR.end());
+
+    // Use conservative percentiles: 3rd and 97th for cleaner inner/outer boundaries
+    float innerR = sortedR[(size_t)(N * 0.03f)];
+    float outerR = sortedR[(size_t)(N * 0.97f)];
+    if (outerR - innerR < 1e-7f) return false;
+
+    // ── Store ─────────────────────────────────────────────────────────────────
+    m_ring.center        = cen;
+    m_ring.axis          = axisRefined;
+    m_ring.innerR        = innerR;
+    m_ring.outerR        = outerR;
+    m_ring.origInnerR    = innerR;
+    m_ring.origOuterR    = outerR;
+    m_ring.currentInnerR = innerR;
+    m_ring.currentOuterR = outerR;
+    m_ring.heightAx      = axMax - axMin;
+    m_ring.valid         = true;
+    m_ring.meshIdx       = meshIdx;
+    m_ring.origVerts     = mo.vertices;  // ← FULL backup, deformation always starts here
 
     float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
-
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 1: Coarse centroid + PCA for initial axis estimate
-    // ════════════════════════════════════════════════════════════════════════
-    double cx=0,cy=0,cz=0;
-    for (const auto& v:mo.vertices){ cx+=v.px; cy+=v.py; cz+=v.pz; }
-    cx/=N; cy/=N; cz/=N;
-    Vec3 cen{(float)cx,(float)cy,(float)cz};
-
-    float C[3][3]={};
-    for (const auto& v:mo.vertices){
-        float d[3]={v.px-(float)cx,v.py-(float)cy,v.pz-(float)cz};
-        for(int i=0;i<3;i++) for(int j=0;j<3;j++) C[i][j]+=d[i]*d[j]/(float)N;
-    }
-    float Vm[3][3]; jacobiEigen3(C,Vm);
-    Vec3 axis{Vm[0][0],Vm[1][0],Vm[2][0]};
-    float al=sqrtf(axis.x*axis.x+axis.y*axis.y+axis.z*axis.z);
-    if(al<1e-9f) return false;
-    axis.x/=al; axis.y/=al; axis.z/=al;
-
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 2: RANSAC cylinder axis refinement
-    // Sample random triplets of vertices, compute candidate axis from their
-    // normals (each vertex normal is perpendicular to the cylinder surface,
-    // so the cylinder axis lies in the normal plane of each vertex).
-    // Score by counting inliers (vertices whose radial deviation < threshold).
-    // ════════════════════════════════════════════════════════════════════════
-    {
-        const float INLIER_TOL = 0.15f; // normalized units — ≈15% of model size
-
-        // Compute initial radius distribution for threshold
-        std::vector<float> initR(N);
-        for(size_t i=0;i<N;i++){
-            float dx=mo.vertices[i].px-cen.x, dy=mo.vertices[i].py-cen.y, dz=mo.vertices[i].pz-cen.z;
-            float a=dx*axis.x+dy*axis.y+dz*axis.z;
-            float rx=dx-a*axis.x,ry=dy-a*axis.y,rz=dz-a*axis.z;
-            initR[i]=sqrtf(rx*rx+ry*ry+rz*rz);
-        }
-        std::vector<float> sortedR=initR; std::sort(sortedR.begin(),sortedR.end());
-        float outerR=sortedR[(size_t)(N*0.92f)];
-        float dynTol = outerR * 0.12f;  // 12% of outer radius as inlier tolerance
-
-        Vec3 bestAxis=axis; Vec3 bestCen=cen; int bestInliers=0;
-
-        // Simple LCG random for reproducibility
-        uint32_t rng=0xDEADBEEF;
-        auto lcg=[&]()->uint32_t{ rng=rng*1664525u+1013904223u; return rng; };
-
-        // Pre-build subsampled index set for fast RANSAC scoring (stride=8)
-        const size_t STRIDE=std::max((size_t)1, N/512);
-        const int RANSAC_ITER = 80; // Reduced from 120 — sufficient with smarter sampling
-
-        for(int it=0;it<RANSAC_ITER;it++){
-            size_t ia=(lcg()%N), ib=(lcg()%N);
-            if(ia==ib) ib=(ib+1)%N;
-            const auto& va=mo.vertices[ia]; const auto& vb=mo.vertices[ib];
-            float nx=va.ny*vb.nz-va.nz*vb.ny;
-            float ny=va.nz*vb.nx-va.nx*vb.nz;
-            float nz=va.nx*vb.ny-va.ny*vb.nx;
-            float nl=sqrtf(nx*nx+ny*ny+nz*nz);
-            if(nl<0.01f) continue;
-            Vec3 cAxis{nx/nl, ny/nl, nz/nl};
-            if(cAxis.x*axis.x+cAxis.y*axis.y+cAxis.z*axis.z < 0){cAxis.x*=-1;cAxis.y*=-1;cAxis.z*=-1;}
-
-            // Fast O(N/STRIDE) median using subsampled radii
-            float medR=0; {
-                std::vector<float> tmp; tmp.reserve(512);
-                for(size_t i=0;i<N;i+=STRIDE){
-                    float dx=mo.vertices[i].px-cen.x,dy=mo.vertices[i].py-cen.y,dz=mo.vertices[i].pz-cen.z;
-                    float a=dx*cAxis.x+dy*cAxis.y+dz*cAxis.z;
-                    float rx=dx-a*cAxis.x,ry=dy-a*cAxis.y,rz=dz-a*cAxis.z;
-                    tmp.push_back(sqrtf(rx*rx+ry*ry+rz*rz));
-                }
-                std::sort(tmp.begin(),tmp.end());
-                medR=tmp[tmp.size()/2];
-            }
-            // Count inliers on subsampled set (O(N/STRIDE) not O(N))
-            int inliers=0;
-            for(size_t i=0;i<N;i+=STRIDE){
-                float dx=mo.vertices[i].px-cen.x,dy=mo.vertices[i].py-cen.y,dz=mo.vertices[i].pz-cen.z;
-                float a=dx*cAxis.x+dy*cAxis.y+dz*cAxis.z;
-                float rx=dx-a*cAxis.x,ry=dy-a*cAxis.y,rz=dz-a*cAxis.z;
-                float r=sqrtf(rx*rx+ry*ry+rz*rz);
-                if(fabsf(r-medR)<dynTol) inliers++;
-            }
-            if(inliers>bestInliers){bestInliers=inliers;bestAxis=cAxis;}
-        }
-        // Only accept RANSAC result if significantly better (>20% more inliers)
-        int origInliers=0;
-        for(size_t i=0;i<N;i++){
-            float dx=mo.vertices[i].px-cen.x,dy=mo.vertices[i].py-cen.y,dz=mo.vertices[i].pz-cen.z;
-            float a=dx*axis.x+dy*axis.y+dz*axis.z;
-            float rx=dx-a*axis.x,ry=dy-a*axis.y,rz=dz-a*axis.z;
-            float r=sqrtf(rx*rx+ry*ry+rz*rz);
-            float medR=sortedR[N/2];
-            float dynTol2=sortedR[(size_t)(N*0.92f)]*0.12f;
-            if(fabsf(r-medR)<dynTol2) origInliers++;
-        }
-        if(bestInliers > (int)(origInliers*1.08f)){
-            axis=bestAxis;
-            LOGI("Ring RANSAC: improved axis, inliers %d→%d",origInliers,bestInliers);
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 3: Weighted centroid refinement + Gauss-Newton cylinder fitting
-    // Minimize: Σ (sqrt((xi-cx)²+(yi-cy)²) - R)² over (cx,cy,R) on axis-plane
-    // This gives sub-pixel accurate center and radius.
-    // ════════════════════════════════════════════════════════════════════════
-    // Build 2D basis perpendicular to axis
-    Vec3 u,v2;
-    {
-        Vec3 tmp={1,0,0};
-        if(fabsf(axis.x)>0.9f) tmp={0,1,0};
-        u.x=axis.y*tmp.z-axis.z*tmp.y;
-        u.y=axis.z*tmp.x-axis.x*tmp.z;
-        u.z=axis.x*tmp.y-axis.y*tmp.x;
-        float ul=sqrtf(u.x*u.x+u.y*u.y+u.z*u.z); u.x/=ul;u.y/=ul;u.z/=ul;
-        v2.x=axis.y*u.z-axis.z*u.y;
-        v2.y=axis.z*u.x-axis.x*u.z;
-        v2.z=axis.x*u.y-axis.y*u.x;
-    }
-
-    // Compute radii with current axis and find histogram peaks
-    std::vector<float> radii(N);
-    float axMin=FLT_MAX,axMax=-FLT_MAX;
-    for(size_t i=0;i<N;i++){
-        float dx=mo.vertices[i].px-cen.x,dy=mo.vertices[i].py-cen.y,dz=mo.vertices[i].pz-cen.z;
-        float along=dx*axis.x+dy*axis.y+dz*axis.z;
-        axMin=std::min(axMin,along); axMax=std::max(axMax,along);
-        float rx=dx-along*axis.x,ry=dy-along*axis.y,rz=dz-along*axis.z;
-        radii[i]=sqrtf(rx*rx+ry*ry+rz*rz);
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 4: 256-bin histogram → valley detection → accurate inner/outer split
-    // Using Kernel Density Estimation (Gaussian kernel, bandwidth=IQR*0.9/N^0.2)
-    // ════════════════════════════════════════════════════════════════════════
-    float rMin=*std::min_element(radii.begin(),radii.end());
-    float rMax=*std::max_element(radii.begin(),radii.end());
-    if(rMax-rMin < 1e-8f) return false;
-
-    const int BINS=256;
-    std::vector<float> hist(BINS,0.f);
-    float binW=(rMax-rMin)/BINS;
-    for(float r:radii){
-        int b=(int)((r-rMin)/binW); b=std::max(0,std::min(BINS-1,b));
-        hist[b]+=1.f;
-    }
-    // Smooth histogram (Gaussian kernel, sigma=4 bins)
-    std::vector<float> smHist(BINS,0.f);
-    const float sigma=4.f;
-    for(int i=0;i<BINS;i++){
-        float sum=0,wt=0;
-        for(int j=std::max(0,i-12);j<std::min(BINS,i+13);j++){
-            float g=expf(-(float)((j-i)*(j-i))/(2.f*sigma*sigma));
-            smHist[i]+=hist[j]*g; wt+=g;
-        }
-        smHist[i]/=wt;
-    }
-
-    // Find two strongest peaks (inner bore and outer surface)
-    // Peak = local maximum above noise floor (5% of max)
-    float histMax=*std::max_element(smHist.begin(),smHist.end());
-    float noise=histMax*0.05f;
-    struct Peak{ int bin; float val; };
-    std::vector<Peak> peaks;
-    for(int i=1;i<BINS-1;i++){
-        if(smHist[i]>smHist[i-1] && smHist[i]>smHist[i+1] && smHist[i]>noise){
-            peaks.push_back({i,smHist[i]});
-        }
-    }
-    // Sort by bin position (radius order)
-    std::sort(peaks.begin(),peaks.end(),[](const Peak&a,const Peak&b){return a.val>b.val;});
-
-    float innerR, outerR;
-    if(peaks.size()>=2){
-        // Two prominent peaks: smaller radius = inner bore, larger = outer surface
-        int binA=peaks[0].bin, binB=peaks[1].bin;
-        if(binA>binB) std::swap(binA,binB);
-        innerR = rMin + (binA+0.5f)*binW;
-        outerR = rMin + (binB+0.5f)*binW;
-    } else {
-        // Fallback: percentile-based
-        std::vector<float> sR=radii; std::sort(sR.begin(),sR.end());
-        innerR=sR[(size_t)(N*0.04f)];
-        outerR=sR[(size_t)(N*0.96f)];
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 5: Gauss-Newton least-squares circle fit on inner bore vertices
-    // Minimizes: Σ (dist(vi,axis) - R_inner)² over axis center position
-    // This gives the most accurate inner diameter (ring size for jewelry).
-    // ════════════════════════════════════════════════════════════════════════
-    float boreTol = (outerR-innerR)*0.30f + innerR*0.15f;
-    // Collect bore vertices (within tolerance of inner peak)
-    std::vector<size_t> boreIdx;
-    for(size_t i=0;i<N;i++){
-        if(fabsf(radii[i]-innerR) < boreTol) boreIdx.push_back(i);
-    }
-
-    if(boreIdx.size() >= 32){
-        // Project bore vertices to 2D (axis-perpendicular plane)
-        // Gauss-Newton: minimize Σ (sqrt((ui-cx)²+(vi-cy)²) - R)²
-        // Jacobian: J[i] = [-(ui-cx)/ri, -(vi-cy)/ri, -1]
-        // We do 8 iterations with damping
-        float cx2=0,cy2=0,R2=innerR;
-        for(size_t bi:boreIdx){
-            float dx=mo.vertices[bi].px-cen.x,dy=mo.vertices[bi].py-cen.y,dz=mo.vertices[bi].pz-cen.z;
-            float along=dx*axis.x+dy*axis.y+dz*axis.z;
-            float rx=dx-along*axis.x,ry=dy-along*axis.y,rz=dz-along*axis.z;
-            cx2+=(rx*u.x+ry*u.y+rz*u.z);
-            cy2+=(rx*v2.x+ry*v2.y+rz*v2.z);
-        }
-        cx2/=(float)boreIdx.size();
-        cy2/=(float)boreIdx.size();
-
-        for(int gnIter=0;gnIter<8;gnIter++){
-            float JtJ[9]={},JtR[3]={};
-            float totalRes=0;
-            for(size_t bi:boreIdx){
-                float dx=mo.vertices[bi].px-cen.x,dy=mo.vertices[bi].py-cen.y,dz=mo.vertices[bi].pz-cen.z;
-                float along=dx*axis.x+dy*axis.y+dz*axis.z;
-                float rx=dx-along*axis.x,ry=dy-along*axis.y,rz=dz-along*axis.z;
-                float pu=rx*u.x+ry*u.y+rz*u.z - cx2;
-                float pv=rx*v2.x+ry*v2.y+rz*v2.z - cy2;
-                float ri=sqrtf(pu*pu+pv*pv); if(ri<1e-9f) continue;
-                float res=ri-R2;
-                float Ja=-pu/ri, Jb=-pv/ri, Jc=-1.f;
-                JtJ[0]+=Ja*Ja; JtJ[1]+=Ja*Jb; JtJ[2]+=Ja*Jc;
-                JtJ[3]+=Ja*Jb; JtJ[4]+=Jb*Jb; JtJ[5]+=Jb*Jc;
-                JtJ[6]+=Ja*Jc; JtJ[7]+=Jb*Jc; JtJ[8]+=Jc*Jc;
-                JtR[0]-=Ja*res; JtR[1]-=Jb*res; JtR[2]-=Jc*res;
-                totalRes+=res*res;
-            }
-            // Levenberg-Marquardt damping
-            float lam=1e-3f*JtJ[0];
-            JtJ[0]+=lam; JtJ[4]+=lam; JtJ[8]+=lam;
-            // 3x3 solve via Cramer's rule
-            float det=JtJ[0]*(JtJ[4]*JtJ[8]-JtJ[5]*JtJ[7])
-                     -JtJ[1]*(JtJ[3]*JtJ[8]-JtJ[5]*JtJ[6])
-                     +JtJ[2]*(JtJ[3]*JtJ[7]-JtJ[4]*JtJ[6]);
-            if(fabsf(det)<1e-20f) break;
-            float dCx=(JtR[0]*(JtJ[4]*JtJ[8]-JtJ[5]*JtJ[7])-JtJ[1]*(JtR[1]*JtJ[8]-JtJ[5]*JtR[2])+JtJ[2]*(JtR[1]*JtJ[7]-JtJ[4]*JtR[2]))/det;
-            float dCy=(JtJ[0]*(JtR[1]*JtJ[8]-JtJ[5]*JtR[2])-JtR[0]*(JtJ[3]*JtJ[8]-JtJ[5]*JtJ[6])+JtJ[2]*(JtJ[3]*JtR[2]-JtR[1]*JtJ[6]))/det;
-            float dR =(JtJ[0]*(JtJ[4]*JtR[2]-JtR[1]*JtJ[7])-JtJ[1]*(JtJ[3]*JtR[2]-JtR[1]*JtJ[6])+JtR[0]*(JtJ[3]*JtJ[7]-JtJ[4]*JtJ[6]))/det;
-            cx2+=dCx; cy2+=dCy; R2+=dR;
-            R2=std::max(R2,0.001f);
-            if(sqrtf(dCx*dCx+dCy*dCy+dR*dR)<1e-7f) break;
-        }
-        // Refined inner radius from Gauss-Newton
-        if(R2 > 0.001f && R2 < outerR*1.5f){
-            innerR = R2;
-            LOGI("Ring GN inner: R=%.5f mm (bore pts=%zu)", R2*toMM, boreIdx.size());
-        }
-    }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // PASS 6: Refine outer radius using outer-surface vertices + robust mean
-    // Use Tukey biweight M-estimator for outlier rejection (prongs/gems)
-    // ════════════════════════════════════════════════════════════════════════
-    float outerTol=(outerR-innerR)*0.3f;
-    std::vector<float> outerRadii;
-    outerRadii.reserve(N/4);
-    for(size_t i=0;i<N;i++){
-        if(fabsf(radii[i]-outerR)<outerTol) outerRadii.push_back(radii[i]);
-    }
-    if(outerRadii.size()>=16){
-        // Tukey biweight: robust mean with c=4.685*MAD
-        float med=outerR;
-        std::vector<float> tmp=outerRadii; std::sort(tmp.begin(),tmp.end());
-        med=tmp[tmp.size()/2];
-        // MAD
-        std::vector<float> dev; dev.reserve(tmp.size());
-        for(float r:tmp) dev.push_back(fabsf(r-med));
-        std::sort(dev.begin(),dev.end());
-        float mad=dev[dev.size()/2];
-        float c=4.685f*mad; if(c<1e-8f) c=0.001f;
-        float num=0,den=0;
-        for(float r:outerRadii){
-            float u=(r-med)/c;
-            if(fabsf(u)>=1.f) continue;
-            float w=(1.f-u*u)*(1.f-u*u);
-            num+=w*r; den+=w;
-        }
-        if(den>0.001f) outerR=num/den;
-    }
-
-    // Final sanity check
-    if(outerR <= innerR || innerR < 0.001f) return false;
-    float bandW = outerR - innerR;
-    float heightMM = (axMax-axMin)*toMM;
-
-    m_ring.center=cen; m_ring.axis=axis;
-    m_ring.innerR=innerR; m_ring.outerR=outerR;
-    m_ring.origInnerR=innerR; m_ring.origOuterR=outerR;
-    m_ring.currentInnerR=innerR; m_ring.currentOuterR=outerR;
-    m_ring.heightAx=axMax-axMin;
-    m_ring.valid=true; m_ring.meshIdx=meshIdx;
-    m_ring.origVerts=mo.vertices;
-
-    LOGI("Ring ultra-accurate: inner⌀=%.4fmm outer⌀=%.4fmm band=%.4fmm h=%.4fmm (RANSAC+GN+Tukey)",
-         innerR*2.f*toMM, outerR*2.f*toMM, bandW*toMM, heightMM);
+    LOGI("Ring v3: innerR=%.3fmm outerR=%.3fmm band=%.3fmm h=%.3fmm axis=(%.3f,%.3f,%.3f) N=%zu borePts=%d",
+         innerR*toMM, outerR*toMM, (outerR-innerR)*toMM, (axMax-axMin)*toMM,
+         axisRefined.x, axisRefined.y, axisRefined.z, N, nBore);
     return true;
 }
 
-
+// ── Parameters in mm ─────────────────────────────────────────────────────────
 bool Renderer::getRingParams(float out[6]) const {
     if (!m_ring.valid) return false;
     float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
@@ -2005,63 +1809,12 @@ void Renderer::applyRingDeformation(float newInnerN, float newOuterN) {
 }
 
 
-
-// ══ FRUSTUM + BRUSH ENGINE ══════════════════════════════════════════════════
-Frustum Renderer::buildFrustum()const{
-    float asp=(float)m_width/std::max(m_height,1);
-    Mat4 vp=Mat4::perspective(45.f*(3.14159265f/180.f),asp,0.01f,100.f)*Mat4::lookAt(cameraEye(),Vec3{m_panX,m_panY,0.f},Vec3{0,1,0});
-    Frustum f;
-    for(int i=0;i<4;i++){f.planes[0][i]=vp.m[i*4+3]+vp.m[i*4+0];f.planes[1][i]=vp.m[i*4+3]-vp.m[i*4+0];
-        f.planes[2][i]=vp.m[i*4+3]+vp.m[i*4+1];f.planes[3][i]=vp.m[i*4+3]-vp.m[i*4+1];
-        f.planes[4][i]=vp.m[i*4+3]+vp.m[i*4+2];f.planes[5][i]=vp.m[i*4+3]-vp.m[i*4+2];}
-    for(int p=0;p<6;p++){float l=sqrtf(f.planes[p][0]*f.planes[p][0]+f.planes[p][1]*f.planes[p][1]+f.planes[p][2]*f.planes[p][2]);if(l>1e-9f)for(int i=0;i<4;i++)f.planes[p][i]/=l;}
-    return f;
-}
-bool Renderer::frustumSphereTest(const Frustum&f,float cx,float cy,float cz,float r)const{
-    for(int p=0;p<6;p++){float d=f.planes[p][0]*cx+f.planes[p][1]*cy+f.planes[p][2]*cz+f.planes[p][3];if(d<-r)return false;}
-    return true;
-}
-void Renderer::buildMeshAdjacency(const MeshObject&mo,std::vector<std::vector<uint32_t>>&adj)const{
-    adj.assign(mo.vertices.size(),{});
-    for(size_t i=0;i+2<mo.indices.size();i+=3){uint32_t a=mo.indices[i],b=mo.indices[i+1],cc=mo.indices[i+2];
-        adj[a].push_back(b);adj[a].push_back(cc);adj[b].push_back(a);adj[b].push_back(cc);adj[cc].push_back(a);adj[cc].push_back(b);}
-}
-static inline float gFall(float d2,float r2){float t=d2/r2;if(t>=1.f)return 0.f;float t3=t*t*t;return 1.f-t3*(10.f-t*(15.f-t*6.f));}
-void Renderer::applySmooth(int mi,float wx,float wy,float wz,float radius,float intensity){
-    if(mi<0||mi>=(int)m_meshes.size())return;
-    auto&mo=m_meshes[mi];float r2=radius*radius;
-    std::vector<std::vector<uint32_t>>adj;buildMeshAdjacency(mo,adj);
-    const size_t N=mo.vertices.size();
-    struct VW{size_t i;float w;};std::vector<VW>aff;aff.reserve(512);
-    for(size_t i=0;i<N;i++){const auto&v=mo.vertices[i];float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;float w=gFall(dx*dx+dy*dy+dz*dz,r2);if(w>0.001f)aff.push_back({i,w});}
-    if(aff.empty())return;
-    std::vector<Vec3>np(N);for(size_t i=0;i<N;i++)np[i]={mo.vertices[i].px,mo.vertices[i].py,mo.vertices[i].pz};
-    for(auto&vw:aff){const auto&nb=adj[vw.i];if(nb.empty())continue;float cx=0,cy=0,cz=0;for(uint32_t n:nb){cx+=mo.vertices[n].px;cy+=mo.vertices[n].py;cz+=mo.vertices[n].pz;}float inv=1.f/(float)nb.size();cx*=inv;cy*=inv;cz*=inv;float d=intensity*vw.w;np[vw.i].x+=d*(cx-np[vw.i].x);np[vw.i].y+=d*(cy-np[vw.i].y);np[vw.i].z+=d*(cz-np[vw.i].z);}
-    for(auto&vw:aff){mo.vertices[vw.i].px=np[vw.i].x;mo.vertices[vw.i].py=np[vw.i].y;mo.vertices[vw.i].pz=np[vw.i].z;}
-    regenerateNormals(mo);updateMeshVBO(mo);
-}
-void Renderer::applySculpt(int mi,float wx,float wy,float wz,float radius,float intensity,float sign){
-    if(mi<0||mi>=(int)m_meshes.size())return;
-    auto&mo=m_meshes[mi];float r2=radius*radius;bool any=false;
-    for(auto&v:mo.vertices){float dx=v.px-wx,dy=v.py-wy,dz=v.pz-wz;float w=gFall(dx*dx+dy*dy+dz*dz,r2);if(w<0.001f)continue;float d=sign*intensity*w;v.px+=d*v.nx;v.py+=d*v.ny;v.pz+=d*v.nz;any=true;}
-    if(any){regenerateNormals(mo);updateMeshVBO(mo);}
-}
-
-// ── Async ring deformation (called from draw() to avoid UI freeze) ────────────
 void Renderer::applyPendingRingDeformation() {
     if (!m_ringDirty) return;
-    float bw = m_pendingBW;
-    float id = m_pendingID;
-    m_ringDirty = false;
-
-    if (bw > 0.f) {
-        m_pendingBW = -1.f;
-        setRingBandWidth(bw);
-    }
-    if (id > 0.f) {
-        m_pendingID = -1.f;
-        setRingInnerDiameter(id);
-    }
+    float bw=m_pendingBW, id=m_pendingID;
+    m_ringDirty=false;
+    if (bw>0.f) { m_pendingBW=-1.f; setRingBandWidth(bw); }
+    if (id>0.f) { m_pendingID=-1.f; setRingInnerDiameter(id); }
 }
 
 // ── Raycasting ───────────────────────────────────────────────────────────────

@@ -444,18 +444,7 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeRemoveZeroAreaFace
     return (jint)g_renderer->removeZeroAreaFaces((int)idx);
 }
 
-JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScale(JNIEnv*,jclass){
-    LOCK_OR_FALSE(); return g_renderer ? g_renderer->getNormalizeScale() : 1.f;
-}
-
-// ── Non-blocking ring deformation setters ─────────────────────────────────────
-// These return instantly and schedule the actual deformation for the next draw()
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidthAsync(
-    JNIEnv*,jclass,jfloat v) {
-    if (g_renderer) g_renderer->setPendingBandWidth((float)v);
-}
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiameterAsync(
-    JNIEnv*,jclass,jfloat v) {
-    if (g_renderer) g_renderer->setPendingInnerDiameter((float)v);
-}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidthAsync(JNIEnv*,jclass,jfloat v){if(g_renderer)g_renderer->setPendingBandWidth((float)v);}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiameterAsync(JNIEnv*,jclass,jfloat v){if(g_renderer)g_renderer->setPendingInnerDiameter((float)v);}
+JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScale(JNIEnv*,jclass){LOCK_OR_FALSE();return g_renderer?g_renderer->getNormalizeScale():1.f;}
 } // extern "C"

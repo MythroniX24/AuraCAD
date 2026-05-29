@@ -10,11 +10,9 @@ class MeshInfoFragment:BottomSheetDialogFragment(){
         root.addView(LinearLayout(ctx).apply{gravity=android.view.Gravity.CENTER_HORIZONTAL;setPadding(0,14,0,0);addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#404058"));layoutParams=LinearLayout.LayoutParams(48,4)})})
         root.addView(LinearLayout(ctx).apply{orientation=LinearLayout.HORIZONTAL;gravity=android.view.Gravity.CENTER_VERTICAL;setPadding(20,14,16,6)
             addView(TextView(ctx).apply{text="ℹ️  Mesh Info";textSize=16f;setTypeface(null,android.graphics.Typeface.BOLD);setTextColor(Color.WHITE);layoutParams=LinearLayout.LayoutParams(0,LinearLayout.LayoutParams.WRAP_CONTENT,1f)})
-            addView(Button(ctx).apply{text="↻ Refresh";textSize=10f;setTextColor(Color.parseColor("#00D4FF"));background=ctx.getDrawable(R.drawable.bg_card_dark);setPadding(16,0,16,0);layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,40);setOnClickListener{load()}})})
+            addView(Button(ctx).apply{text="↻";textSize=12f;setTextColor(Color.parseColor("#00D4FF"));background=ctx.getDrawable(R.drawable.bg_card_dark);setPadding(16,0,16,0);layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,40);setOnClickListener{load()}})})
         root.addView(View(ctx).apply{setBackgroundColor(Color.parseColor("#1A1A28"));layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,1)})
-        tv=TextView(ctx).apply{text="⏳ Loading…";textSize=11f;setTextColor(Color.WHITE);typeface=android.graphics.Typeface.MONOSPACE
-            background=ctx.getDrawable(R.drawable.bg_hint_card);setPadding(16,16,16,16)
-            layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT).apply{setMargins(14,12,14,0)}}
+        tv=TextView(ctx).apply{text="⏳ Loading…";textSize=11f;setTextColor(Color.WHITE);typeface=android.graphics.Typeface.MONOSPACE;background=ctx.getDrawable(R.drawable.bg_hint_card);setPadding(16,16,16,16);layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,LinearLayout.LayoutParams.WRAP_CONTENT).apply{setMargins(14,12,14,0)}}
         root.addView(tv);load();return scroll
     }
     private fun load(){(activity as? MainActivity)?.glView?.queueEvent{

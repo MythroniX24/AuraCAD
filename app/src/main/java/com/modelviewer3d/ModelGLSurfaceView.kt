@@ -98,8 +98,7 @@ class ModelGLSurfaceView @JvmOverloads constructor(
         scaleDetector.onTouchEvent(event)
         gestureDetector.onTouchEvent(event)
 
-        // RULER mode: single-tap is handled via gestureDetector.onSingleTapConfirmed
-        // Camera rotation/pan/zoom still works normally in RULER mode
+        // RULER mode: single-tap handled in onSingleTapConfirmed; rotation still works
         val count = event.pointerCount
         when (event.actionMasked) {
 
