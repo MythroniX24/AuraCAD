@@ -5,22 +5,23 @@ on:
     branches: [ main, master ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch:    # Manual trigger from Actions tab
+  workflow_dispatch:
 
-# Cancel an in-flight build on the same ref when a new commit arrives.
-# Saves ~30-40 min of cold NDK builds when force-pushing or rebasing.
 concurrency:
   group: android-build-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   build:
     name: Build Debug + Release APK
     runs-on: ubuntu-latest
-    timeout-minutes: 60   # NDK C++ builds can take 30-45 min cold
+    timeout-minutes: 60
+
     env:
-      # Push gradle into parallel + build-cache mode without editing gradle.properties
-      GRADLE_OPTS: "-Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g -XX:+HeapDumpOnOutOfMemoryError"
+      GRADLE_OPTS: "-Dorg.gradle.parallel=true -Dorg.gradle.caching=true -Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4g"
 
     steps:
       # ── 1. Checkout ──────────────────────────────────────────────────────────
@@ -33,46 +34,50 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
+          cache: 'gradle'
 
-      # ── 3. Bootstrap gradle-wrapper.jar (fast — wget from Gradle CDN) ────────
-      # Downloads the binary jar directly instead of installing Gradle via SDKMAN.
-      # ~2 seconds vs 3-5 minutes for the SDKMAN approach.
+      # ── 3. Bootstrap gradle-wrapper.jar ──────────────────────────────────────
       - name: Bootstrap Gradle wrapper jar
         run: |
           if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            echo "gradle-wrapper.jar not found — downloading from Gradle CDN"
+            echo "Downloading gradle-wrapper.jar from GitHub Gradle release..."
             mkdir -p gradle/wrapper
+            # Try primary source
             wget -q -O gradle/wrapper/gradle-wrapper.jar \
-              "https://github.com/gradle/gradle/raw/v8.2.0/gradle/wrapper/gradle-wrapper.jar"
-            echo "✓ gradle-wrapper.jar downloaded"
+              "https://github.com/gradle/gradle/raw/v8.2.0/gradle/wrapper/gradle-wrapper.jar" || \
+            # Fallback: build it from a known-good release binary
+            curl -sL "https://github.com/gradle/gradle/raw/v8.2.0/gradle/wrapper/gradle-wrapper.jar" \
+              -o gradle/wrapper/gradle-wrapper.jar
+            echo "✓ gradle-wrapper.jar downloaded ($(wc -c < gradle/wrapper/gradle-wrapper.jar) bytes)"
           else
             echo "✓ gradle-wrapper.jar already present"
           fi
 
-      # ── 4. Android SDK ────────────────────────────────────────────────────────
+      # ── 4. Setup Android SDK ──────────────────────────────────────────────────
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
       # ── 5. Install NDK 27 + CMake 3.22 ───────────────────────────────────────
       - name: Install NDK and CMake
         run: |
-          sdkmanager \
-            "ndk;27.2.12479018" \
-            "cmake;3.22.1" \
-            --sdk_root=$ANDROID_SDK_ROOT
-          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+          SDK_MANAGER="sdkmanager"
+          if ! command -v sdkmanager &> /dev/null; then
+            if [ -n "$ANDROID_HOME" ] && [ -f "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" ]; then
+              SDK_MANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            elif [ -n "$ANDROID_SDK_ROOT" ] && [ -f "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
+              SDK_MANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+            fi
+          fi
+          echo "Using sdkmanager: $SDK_MANAGER"
+          yes | $SDK_MANAGER --licenses || true
+          $SDK_MANAGER "ndk;27.2.12479018" "cmake;3.22.1"
+          if [ -d "$ANDROID_HOME/ndk/27.2.12479018" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> $GITHUB_ENV
+          elif [ -d "$ANDROID_SDK_ROOT/ndk/27.2.12479018" ]; then
+            echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+          fi
 
-      # ── 6. Cache Gradle downloads ─────────────────────────────────────────────
-      - name: Cache Gradle caches
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*','**/gradle-wrapper.properties') }}
-          restore-keys: gradle-${{ runner.os }}-
-
-      # ── 7. Cache CMake / NDK build outputs ────────────────────────────────────
+      # ── 6. Cache CMake build outputs ─────────────────────────────────────────
       - name: Cache CMake build outputs
         uses: actions/cache@v4
         with:
@@ -80,11 +85,13 @@ jobs:
           key: cxx-${{ runner.os }}-${{ hashFiles('**/CMakeLists.txt','**/*.cpp','**/*.h') }}
           restore-keys: cxx-${{ runner.os }}-
 
-      # ── 8. Make gradlew executable ────────────────────────────────────────────
+      # ── 7. Fix gradlew permissions ────────────────────────────────────────────
       - name: Grant gradlew execute permission
-        run: chmod +x ./gradlew
+        run: |
+          sed -i 's/\r$//' ./gradlew || true
+          chmod +x ./gradlew
 
-      # ── 9. Build Debug APK ────────────────────────────────────────────────────
+      # ── 8. Build Debug APK ────────────────────────────────────────────────────
       - name: Build Debug APK
         run: |
           ./gradlew assembleDebug \
@@ -94,8 +101,8 @@ jobs:
             --stacktrace \
             -Pandroid.ndkVersion=27.2.12479018
 
-      # ── 10. Build Release APK (unsigned) ──────────────────────────────────────
-      - name: Build Release APK (unsigned)
+      # ── 9. Build Release APK ──────────────────────────────────────────────────
+      - name: Build Release APK
         run: |
           ./gradlew assembleRelease \
             --no-daemon \
@@ -104,35 +111,35 @@ jobs:
             --stacktrace \
             -Pandroid.ndkVersion=27.2.12479018
 
-      # ── 11. Show built APKs ───────────────────────────────────────────────────
+      # ── 10. List built APKs ───────────────────────────────────────────────────
       - name: List built APKs
         run: find app/build/outputs/apk -name "*.apk" -exec ls -lh {} \;
 
-      # ── 11b. Surface NDK link errors on failure ───────────────────────────────
+      # ── 11. Show error logs on failure ────────────────────────────────────────
       - name: Show CMake error log on failure
         if: failure()
         run: |
           echo "── Last 200 lines of any failed-build log ──"
           find app/.cxx -name "*.log" -exec tail -n 200 {} \; 2>/dev/null || true
-          find app/build -name "build.gradle*.log" -exec tail -n 200 {} \; 2>/dev/null || true
+          find app/build -name "*.log" -exec tail -n 200 {} \; 2>/dev/null || true
 
-      # ── 12. Upload Debug APK artifact ─────────────────────────────────────────
+      # ── 12. Upload Debug APK ──────────────────────────────────────────────────
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3DModelViewer-debug-${{ github.run_number }}
+          name: AuraCAD-debug-${{ github.run_number }}
           path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
-      # ── 13. Upload Release APK artifact ───────────────────────────────────────
-      - name: Upload Release APK (unsigned)
+      # ── 13. Upload Release APK ────────────────────────────────────────────────
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: 3DModelViewer-release-unsigned-${{ github.run_number }}
+          name: AuraCAD-release-${{ github.run_number }}
           path: app/build/outputs/apk/release/*.apk
           retention-days: 30
 
-      # ── 14. Create GitHub Release on version tag (git tag v1.0.0 → push) ─────
+      # ── 14. Create GitHub Release on version tag ──────────────────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2

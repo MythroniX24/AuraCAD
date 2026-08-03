@@ -25,13 +25,50 @@ android {
         }
     }
 
+    signingConfigs {
+        // Use debug.keystore for both debug and release builds in CI.
+        // For a Play Store upload, replace with your real keystore via
+        // GitHub Secrets (KEYSTORE_PATH, STORE_PASSWORD, KEY_ALIAS, KEY_PASSWORD).
+        def keystoreEnv = System.getenv("KEYSTORE_PATH")
+        def hasKeystoreEnv = keystoreEnv != null && !keystoreEnv.isEmpty() && file(keystoreEnv).exists()
+        def hasLocalKeystore = file("${rootDir}/my-upload-key.jks").exists()
+        def hasDebugKeystore = file("${rootDir}/debug.keystore").exists()
+
+        release {
+            if (hasKeystoreEnv) {
+                storeFile file(keystoreEnv)
+                storePassword System.getenv("STORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS") ?: "upload"
+                keyPassword System.getenv("KEY_PASSWORD")
+            } else if (hasLocalKeystore) {
+                storeFile file("${rootDir}/my-upload-key.jks")
+                storePassword System.getenv("STORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS") ?: "upload"
+                keyPassword System.getenv("KEY_PASSWORD")
+            } else if (hasDebugKeystore) {
+                storeFile file("${rootDir}/debug.keystore")
+                storePassword "android"
+                keyAlias "androiddebugkey"
+                keyPassword "android"
+            }
+        }
+        debug {
+            storeFile file("${rootDir}/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.release
         }
         debug {
             debuggable true
+            signingConfig signingConfigs.debug
         }
     }
 
@@ -42,7 +79,6 @@ android {
         }
     }
 
-    // viewBinding NOT needed — we use findViewById
     buildFeatures {
         viewBinding false
     }
@@ -62,7 +98,6 @@ android {
 dependencies {
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
-    // Material Components — required for BottomSheetDialogFragment
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
     implementation 'androidx.lifecycle:lifecycle-runtime-ktx:2.7.0'
