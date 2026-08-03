@@ -550,6 +550,7 @@ bool Renderer::uploadParsed(){
     m_origWmm        = m_pendingData->widthMM();
     m_origHmm        = m_pendingData->heightMM();
     m_origDmm        = m_pendingData->depthMM();
+    m_unitToMM       = m_pendingData->unitToMM;
     m_normalizeScale = m_pendingData->normalizeScale;
 
     MeshObject mo;
@@ -697,6 +698,7 @@ bool Renderer::loadModel(const std::string& path){
     ModelData md;
     if(!ModelLoader::load(path,md)) return false;
     m_origWmm=md.widthMM(); m_origHmm=md.heightMM(); m_origDmm=md.depthMM();
+    m_unitToMM=md.unitToMM;
     m_normalizeScale=md.normalizeScale;
     separateIntoMeshes(md);
     m_hasModel=!m_meshes.empty();
@@ -748,15 +750,13 @@ void Renderer::setMeshScaleMM(int idx,float w,float h,float d){
         minZ=std::min(minZ,v.pz);maxZ=std::max(maxZ,v.pz);
     }
     float sx=maxX-minX, sy=maxY-minY, sz=maxZ-minZ;
-    // sx is in normalized units; convert to mm via normalizeScale
-    float uToMM = (m_normalizeScale>1e-9f)? (1.0f/m_normalizeScale) : 1.0f;
-    // origMeshMm = sx/normalizeScale * unitToMM... simplified:
-    // desired world size = scaX * sx → desired world * uToMM/m_origWmm… 
-    // Simpler: scaX = desired_mm / (sx * mmPerUnit)
-    float mmPerUnit = (m_origWmm>1e-9f)?m_origWmm/2.0f:1.0f;
-    if(sx>1e-9f) mo.scaX=w/(sx*mmPerUnit);
-    if(sy>1e-9f) mo.scaY=h/(sy*mmPerUnit);
-    if(sz>1e-9f) mo.scaZ=d/(sz*mmPerUnit);
+    // sx is the mesh's extent in normalized units. mm = sx * mmPerUnit()
+    // at scale=1, so to reach the requested w/h/d mm we scale by
+    // requested_mm / (extent * mmPerUnit()).
+    float mpu = mmPerUnit();
+    if(sx>1e-9f) mo.scaX=w/(sx*mpu);
+    if(sy>1e-9f) mo.scaY=h/(sy*mpu);
+    if(sz>1e-9f) mo.scaZ=d/(sz*mpu);
 }
 void Renderer::getMeshSizeMM(int idx,float& w,float& h,float& d) const {
     if(idx<0||idx>=(int)m_meshes.size()){w=h=d=0;return;}
@@ -768,10 +768,10 @@ void Renderer::getMeshSizeMM(int idx,float& w,float& h,float& d) const {
         minY=std::min(minY,v.py);maxY=std::max(maxY,v.py);
         minZ=std::min(minZ,v.pz);maxZ=std::max(maxZ,v.pz);
     }
-    float mmPerUnit=(m_origWmm>1e-9f)?m_origWmm/2.0f:1.0f;
-    w=(maxX-minX)*fabsf(mo.scaX)*mmPerUnit;
-    h=(maxY-minY)*fabsf(mo.scaY)*mmPerUnit;
-    d=(maxZ-minZ)*fabsf(mo.scaZ)*mmPerUnit;
+    float mpu=mmPerUnit();
+    w=(maxX-minX)*fabsf(mo.scaX)*mpu;
+    h=(maxY-minY)*fabsf(mo.scaY)*mpu;
+    d=(maxZ-minZ)*fabsf(mo.scaZ)*mpu;
 }
 
 // ── Per-mesh independent transforms (Phase 2 Transform Tool) ────────────────
@@ -846,9 +846,16 @@ int Renderer::pickMesh(float sx, float sy, float sw, float sh){
 }
 
 // ── Size ─────────────────────────────────────────────────────────────────────
+// ORIGINAL size in mm — stored at load time, never changes (source of truth
+// for the "Original" readout and for ratio-based uniform scaling).
 void Renderer::getModelSizeMM(float& w,float& h,float& d) const {
+    w=m_origWmm; h=m_origHmm; d=m_origDmm;
+}
+// CURRENT size in mm — world-space bounding box after ALL transforms
+// (global rotation/translation/scale + per-mesh transforms).
+void Renderer::getCurrentSizeMM(float& w,float& h,float& d) const {
     if (m_meshes.empty()){w=m_origWmm;h=m_origHmm;d=m_origDmm;return;}
-    float toMM=(m_normalizeScale>1e-9f)?(1.f/m_normalizeScale):1.f;
+    float mpu=mmPerUnit();
     float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX,mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
     Mat4 global=buildGlobalMatrix();
     for(const auto& mo:m_meshes){if(!mo.visible)continue;
@@ -860,10 +867,9 @@ void Renderer::getModelSizeMM(float& w,float& h,float& d) const {
             mnX=std::min(mnX,px);mxX=std::max(mxX,px);
             mnY=std::min(mnY,py);mxY=std::max(mxY,py);
             mnZ=std::min(mnZ,pz);mxZ=std::max(mxZ,pz);}}
-    if(mxX>mnX){w=(mxX-mnX)*toMM;h=(mxY-mnY)*toMM;d=(mxZ-mnZ)*toMM;}
+    if(mxX>mnX){w=(mxX-mnX)*mpu;h=(mxY-mnY)*mpu;d=(mxZ-mnZ)*mpu;}
     else{w=m_origWmm;h=m_origHmm;d=m_origDmm;}
 }
-void Renderer::getCurrentSizeMM(float& w,float& h,float& d) const { getModelSizeMM(w,h,d); }
 
 // ── Export helpers ────────────────────────────────────────────────────────────
 // Transform a 3D point by a column-major 4x4 matrix (with perspective divide)
@@ -903,7 +909,7 @@ bool Renderer::exportOBJ(const std::string& path) const {
         // Combined transform: global(userScale/rot/trans) * meshTransform * mmConversion
         // mmConversion converts from normalized [-1,1] coords back to real-world mm units.
         // This ensures exported files are correctly sized (1 OBJ unit = 1 mm).
-        float toMM = (m_normalizeScale > 1e-9f) ? (1.0f / m_normalizeScale) : 1.0f;
+        float toMM = mmPerUnit();
         Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
         Mat4 model  = global * buildMeshMatrix(mo) * mmConv;
 
@@ -942,7 +948,7 @@ bool Renderer::exportSTL(const std::string& path) const {
 
     for(const auto& mo : m_meshes){
         if(!mo.visible) continue;
-        float toMM = (m_normalizeScale > 1e-9f) ? (1.0f / m_normalizeScale) : 1.0f;
+        float toMM = mmPerUnit();
         Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
         Mat4 model  = global * buildMeshMatrix(mo) * mmConv;
 
@@ -1224,7 +1230,7 @@ void Renderer::getMeshStats(int meshIdx, MeshStats& out) const {
     const size_t nT = mo.indices.size() / 3;
     if (mo.vertices.empty()) return;
 
-    float toMM = (m_normalizeScale>1e-9f) ? (1.f/m_normalizeScale) : 1.f;
+    float toMM = mmPerUnit();
 
     // Bounding box
     float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX;
@@ -1287,7 +1293,7 @@ int Renderer::weldVertices(int meshIdx, float epsilonMM) {
     auto& mo = m_meshes[meshIdx];
     if (mo.vertices.empty()) return 0;
 
-    float toNorm = (m_normalizeScale>1e-9f) ? m_normalizeScale : 1.f;
+    float toNorm = unitPerMM();
     float eps    = epsilonMM * toNorm;
     float cellSz = eps * 2.f;
 
@@ -1420,13 +1426,15 @@ bool Renderer::applySmooth(int meshIdx, float cx, float cy, float cz,
         adj[i2].push_back(i0); adj[i2].push_back(i1);
     }
 
-    const float radiusSq = radius * radius;
-    std::vector<glm::vec3> newPos(N);
-    for (size_t i = 0; i < N; ++i) newPos[i] = mo.vertices[i].position;
+    const float radiusN = radius * unitPerMM();   // mm → normalized units
+    const float radiusSq = radiusN * radiusN;
+    // Work on the mesh vertices in place; only commit if something changed.
+    std::vector<Vertex> newPos(N);
+    for (size_t i = 0; i < N; ++i) newPos[i] = mo.vertices[i];
 
     for (size_t i = 0; i < N; ++i) {
-        const glm::vec3& p = mo.vertices[i].position;
-        float dx = p.x - cx, dy = p.y - cy, dz = p.z - cz;
+        const Vertex& v = mo.vertices[i];
+        float dx = v.px - cx, dy = v.py - cy, dz = v.pz - cz;
         float distSq = dx*dx + dy*dy + dz*dz;
         if (distSq > radiusSq || adj[i].empty()) continue;
 
@@ -1434,21 +1442,33 @@ bool Renderer::applySmooth(int meshIdx, float cx, float cy, float cz,
         float t = 1.f - (distSq / radiusSq);
         float w  = t * t * strength;
 
-        glm::vec3 avg(0,0,0);
+        float ax = 0.f, ay = 0.f, az = 0.f;
         // Deduplicate neighbours
         auto& nbrs = adj[i];
         std::sort(nbrs.begin(), nbrs.end());
         nbrs.erase(std::unique(nbrs.begin(), nbrs.end()), nbrs.end());
-        for (uint32_t nb : nbrs) avg += mo.vertices[nb].position;
-        avg /= (float)nbrs.size();
+        for (uint32_t nb : nbrs) {
+            ax += mo.vertices[nb].px;
+            ay += mo.vertices[nb].py;
+            az += mo.vertices[nb].pz;
+        }
+        ax /= (float)nbrs.size();
+        ay /= (float)nbrs.size();
+        az /= (float)nbrs.size();
 
-        newPos[i] = p + (avg - p) * w;
+        newPos[i].px = v.px + (ax - v.px) * w;
+        newPos[i].py = v.py + (ay - v.py) * w;
+        newPos[i].pz = v.pz + (az - v.pz) * w;
     }
 
     bool changed = false;
     for (size_t i = 0; i < N; ++i) {
-        if (newPos[i] != mo.vertices[i].position) {
-            mo.vertices[i].position = newPos[i];
+        if (newPos[i].px != mo.vertices[i].px ||
+            newPos[i].py != mo.vertices[i].py ||
+            newPos[i].pz != mo.vertices[i].pz) {
+            mo.vertices[i].px = newPos[i].px;
+            mo.vertices[i].py = newPos[i].py;
+            mo.vertices[i].pz = newPos[i].pz;
             changed = true;
         }
     }
@@ -1471,20 +1491,28 @@ bool Renderer::applySculpt(int meshIdx, float cx, float cy, float cz,
     const size_t N = mo.vertices.size();
     if (N < 3) return false;
 
-    const float radiusSq = radius * radius;
+    const float radiusN = radius * unitPerMM();   // mm → normalized units
+    const float radiusSq = radiusN * radiusN;
     bool changed = false;
 
     for (size_t i = 0; i < N; ++i) {
-        glm::vec3& p = mo.vertices[i].position;
-        float dx = p.x - cx, dy = p.y - cy, dz = p.z - cz;
+        Vertex& v = mo.vertices[i];
+        float dx = v.px - cx, dy = v.py - cy, dz = v.pz - cz;
         float distSq = dx*dx + dy*dy + dz*dz;
         if (distSq > radiusSq) continue;
 
         float t = 1.f - (distSq / radiusSq);
         float w = t * t;   // cos² falloff
 
-        glm::vec3 n = glm::normalize(mo.vertices[i].normal);
-        p += n * (amount * w);
+        // Normalize the stored vertex normal
+        float nl = sqrtf(v.nx*v.nx + v.ny*v.ny + v.nz*v.nz);
+        float nxf = (nl > 1e-12f) ? v.nx/nl : 0.f;
+        float nyf = (nl > 1e-12f) ? v.ny/nl : 0.f;
+        float nzf = (nl > 1e-12f) ? v.nz/nl : 0.f;
+
+        v.px += nxf * (amount * w);
+        v.py += nyf * (amount * w);
+        v.pz += nzf * (amount * w);
         changed = true;
     }
 
@@ -1644,6 +1672,7 @@ static void applyRadialMap(
     const std::vector<Vertex>& orig,   // always deform from backup
     const Vec3&       cen,             // ring centroid (on bore axis)
     const Vec3&       axis,            // unit ring axis
+    float             axialScale,      // stretch factor along axis (1 = keep)
     const RadialMap&  mapR             // r_orig → r_new
 ) {
     const size_t N = orig.size();
@@ -1667,16 +1696,21 @@ static void applyRadialMap(
         float r  = sqrtf(rx*rx + ry*ry + rz*rz);
 
         if (r < 1e-14f) {
-            // Vertex exactly on axis — don't move (e.g. degenerate tri center)
+            // Vertex exactly on axis — only axial stretch applies
+            float aNew = along * axialScale;
+            dst.px = cen.x + aNew * axis.x;
+            dst.py = cen.y + aNew * axis.y;
+            dst.pz = cen.z + aNew * axis.z;
             continue;
         }
 
         float rNew   = mapR(r);
         float scale  = rNew / r;   // only radial direction scaled
+        float aNew   = along * axialScale;
 
-        dst.px = cen.x + along * axis.x + rx * scale;
-        dst.py = cen.y + along * axis.y + ry * scale;
-        dst.pz = cen.z + along * axis.z + rz * scale;
+        dst.px = cen.x + aNew * axis.x + rx * scale;
+        dst.py = cen.y + aNew * axis.y + ry * scale;
+        dst.pz = cen.z + aNew * axis.z + rz * scale;
     }
 }
 
@@ -1801,11 +1835,12 @@ bool Renderer::analyzeRing(int meshIdx) {
     m_ring.currentInnerR = innerR;
     m_ring.currentOuterR = outerR;
     m_ring.heightAx      = axMax - axMin;
+    m_ring.currentHeight = axMax - axMin;
     m_ring.valid         = true;
     m_ring.meshIdx       = meshIdx;
     m_ring.origVerts     = mo.vertices;  // ← FULL backup, deformation always starts here
 
-    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
+    float toMM = mmPerUnit();
 
     // ── Seed the desired-state record with the ring's original parameters.
     // This is essential: if the user later moves only the BW slider, m_desiredIDmm
@@ -1813,10 +1848,12 @@ bool Renderer::analyzeRing(int meshIdx) {
     // can apply both parameters together without losing the other one.
     m_desiredBWmm = (outerR - innerR) * toMM;   // original band width in mm
     m_desiredIDmm = innerR * 2.f        * toMM; // original inner diameter in mm
+    m_desiredHmm  = (axMax - axMin)     * toMM; // original height in mm
 
     // Clear any stale pending values left over from a previous ring session
     m_pendingBW.store(-1.f, std::memory_order_relaxed);
     m_pendingID.store(-1.f, std::memory_order_relaxed);
+    m_pendingH.store(-1.f, std::memory_order_relaxed);
     m_ringDirty.store(false, std::memory_order_relaxed);
 
     LOGI("Ring v3: innerR=%.3fmm outerR=%.3fmm band=%.3fmm h=%.3fmm axis=(%.3f,%.3f,%.3f) N=%zu borePts=%d",
@@ -1828,7 +1865,7 @@ bool Renderer::analyzeRing(int meshIdx) {
 // ── Parameters in mm ─────────────────────────────────────────────────────────
 bool Renderer::getRingParams(float out[6]) const {
     if (!m_ring.valid) return false;
-    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
+    float toMM = mmPerUnit();
     float curInnerMM = m_ring.currentInnerR * toMM;
     float curOuterMM = m_ring.currentOuterR * toMM;
     float curBandMM  = (m_ring.currentOuterR - m_ring.currentInnerR) * toMM;
@@ -1837,7 +1874,7 @@ bool Renderer::getRingParams(float out[6]) const {
     out[2] = curBandMM;         // band width = wall thickness (mm)
     out[3] = curInnerMM * 2.f;  // inner diameter (mm)
     out[4] = curOuterMM * 2.f;  // outer diameter (mm)
-    out[5] = m_ring.heightAx * toMM;  // ring height (mm)
+    out[5] = m_ring.currentHeight * toMM;  // ring height (mm)
     return true;
 }
 
@@ -1851,12 +1888,12 @@ void Renderer::setRingBandWidth(float newWidthMM) {
         m_ring.meshIdx >= (int)m_meshes.size()) return;
     if (m_ring.origVerts.empty() || newWidthMM < 1e-9f) return;
     m_desiredBWmm = newWidthMM;
-    applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm);
+    applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm, m_desiredHmm);
 }
 
 // ── Set inner diameter — synchronous GL-thread API ───────────────────────────
 // Updates the desired ID and applies the combined deformation so that the
-// current band-width setting is preserved.  Delegates all math to
+// current band-width and height settings are preserved.  Delegates all math to
 // applyCombinedRingDeformation which is the single authoritative deformation
 // entry point.
 void Renderer::setRingInnerDiameter(float newDiamMM) {
@@ -1864,7 +1901,19 @@ void Renderer::setRingInnerDiameter(float newDiamMM) {
         m_ring.meshIdx >= (int)m_meshes.size()) return;
     if (m_ring.origVerts.empty() || newDiamMM < 1e-9f) return;
     m_desiredIDmm = newDiamMM;
-    applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm);
+    applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm, m_desiredHmm);
+}
+
+// ── Set height (axial extent) — synchronous GL-thread API ────────────────────
+// Stretches/squashes the ring along its hole axis.  Radial map (band width +
+// inner diameter) is preserved because applyCombinedRingDeformation applies
+// all three parameters together from origVerts.
+void Renderer::setRingHeight(float newHeightMM) {
+    if (!m_ring.valid || m_ring.meshIdx < 0 ||
+        m_ring.meshIdx >= (int)m_meshes.size()) return;
+    if (m_ring.origVerts.empty() || newHeightMM < 1e-9f) return;
+    m_desiredHmm = newHeightMM;
+    applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm, m_desiredHmm);
 }
 
 // ── Reset to original shape ───────────────────────────────────────────────────
@@ -1877,17 +1926,20 @@ void Renderer::resetRingDeformation() {
     mo.vertices          = m_ring.origVerts;
     m_ring.currentInnerR = m_ring.origInnerR;
     m_ring.currentOuterR = m_ring.origOuterR;
+    m_ring.currentHeight = m_ring.heightAx;
 
     // Reset desired state back to original ring parameters so that
     // subsequent slider moves start from the correct baseline
-    float toMM = (m_normalizeScale > 1e-9f) ? (1.f / m_normalizeScale) : 1.f;
+    float toMM = mmPerUnit();
     m_desiredBWmm = (m_ring.origOuterR - m_ring.origInnerR) * toMM;
     m_desiredIDmm =  m_ring.origInnerR * 2.f                * toMM;
+    m_desiredHmm  =  m_ring.heightAx                        * toMM;
 
     // Discard any in-flight pending values so the next draw() doesn't
     // immediately re-apply a stale deformation on top of the reset
     m_pendingBW.store(-1.f, std::memory_order_relaxed);
     m_pendingID.store(-1.f, std::memory_order_relaxed);
+    m_pendingH.store(-1.f, std::memory_order_relaxed);
     m_ringDirty.store(false, std::memory_order_relaxed);
 
     regenerateNormals(mo);
@@ -1923,36 +1975,41 @@ void Renderer::recomputeBounds(MeshObject& mo) {
 // The old code applied BW and ID separately from origVerts, so the second
 // operation always overwrote the first (e.g. moving the ID slider would
 // silently undo any BW change because setRingInnerDiameter also starts from
-// origVerts).  This function fixes that by applying BOTH parameters in one
-// unified radial-map pass:
+// origVerts).  This function fixes that by applying ALL parameters in one
+// unified radial+axial map pass:
 //
 //   r_new = newInnerR + (r_orig - origInnerR) * bandScale
+//   h_new = h_orig * heightScale
 //
 // where:
-//   newInnerR  = (desiredIDmm / 2) * normalizeScale  (shifted bore radius)
-//   bandScale  = desiredBWmm / origBandMM             (wall-thickness scale)
+//   newInnerR   = (desiredIDmm / 2) * unitPerMM  (shifted bore radius)
+//   bandScale   = desiredBWmm / origBandMM       (wall-thickness scale)
+//   heightScale = desiredHmm  / origHeightMM     (axial stretch factor)
 //
 // Properties:
 //   • When only BW changed  → newInnerR == origInnerR, only wall scales
 //   • When only ID changed  → bandScale == 1,           pure uniform shift
-//   • When both changed     → bore shifts AND wall scales simultaneously
+//   • When only H changed   → both radial scales == 1,  pure axial stretch
+//   • When multiple changed → all applied simultaneously, zero cumulative error
 //   • Always deforms from origVerts → zero cumulative error
 //   • After the map, bbox is rebuilt so the selection overlay is correct
-void Renderer::applyCombinedRingDeformation(float bwMM, float idMM) {
+void Renderer::applyCombinedRingDeformation(float bwMM, float idMM, float hMM) {
     if (!m_ring.valid || m_ring.meshIdx < 0 ||
         m_ring.meshIdx >= (int)m_meshes.size()) return;
-    if (m_ring.origVerts.empty() || bwMM < 1e-9f || idMM < 1e-9f) return;
+    if (m_ring.origVerts.empty() || bwMM < 1e-9f || idMM < 1e-9f || hMM < 1e-9f) return;
 
-    float toNorm    = (m_normalizeScale > 1e-9f) ? m_normalizeScale : 1.f;
-    float newInnerN = (idMM * 0.5f) * toNorm;          // desired bore radius (norm)
-    float origBandN = m_ring.origOuterR - m_ring.origInnerR;
-    float newBandN  = bwMM * toNorm;
-    float bandScale = (origBandN > 1e-9f) ? (newBandN / origBandN) : 1.f;
-    float origInner = m_ring.origInnerR;
+    float upm        = unitPerMM();
+    float newInnerN  = (idMM * 0.5f) * upm;          // desired bore radius (norm)
+    float origBandN  = m_ring.origOuterR - m_ring.origInnerR;
+    float newBandN   = bwMM * upm;
+    float bandScale  = (origBandN > 1e-9f) ? (newBandN / origBandN) : 1.f;
+    float heightScale= (m_ring.heightAx > 1e-9f) ? ((hMM * upm) / m_ring.heightAx) : 1.f;
+    float origInner  = m_ring.origInnerR;
 
     auto& mo = m_meshes[m_ring.meshIdx];
 
     applyRadialMap(mo, m_ring.origVerts, m_ring.center, m_ring.axis,
+        heightScale,
         [newInnerN, origInner, bandScale](float r) -> float {
             float rRel = r - origInner;          // distance from original bore surface
             float rNew = newInnerN + rRel * bandScale;
@@ -1961,6 +2018,7 @@ void Renderer::applyCombinedRingDeformation(float bwMM, float idMM) {
 
     m_ring.currentInnerR = newInnerN;
     m_ring.currentOuterR = newInnerN + newBandN;
+    m_ring.currentHeight = m_ring.heightAx * heightScale;
 
     regenerateNormals(mo);
     updateMeshVBO(mo);
@@ -1982,13 +2040,15 @@ void Renderer::applyPendingRingDeformation() {
 
     float bw = m_pendingBW.exchange(-1.f, std::memory_order_acquire);
     float id = m_pendingID.exchange(-1.f, std::memory_order_acquire);
+    float h  = m_pendingH.exchange(-1.f, std::memory_order_acquire);
 
     if (bw > 0.f) m_desiredBWmm = bw;
     if (id > 0.f) m_desiredIDmm = id;
+    if (h  > 0.f) m_desiredHmm  = h;
 
     // Only act if the ring has been analyzed and desired state is valid
-    if (m_ring.valid && m_desiredBWmm > 0.f && m_desiredIDmm > 0.f) {
-        applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm);
+    if (m_ring.valid && m_desiredBWmm > 0.f && m_desiredIDmm > 0.f && m_desiredHmm > 0.f) {
+        applyCombinedRingDeformation(m_desiredBWmm, m_desiredIDmm, m_desiredHmm);
     }
 }
 

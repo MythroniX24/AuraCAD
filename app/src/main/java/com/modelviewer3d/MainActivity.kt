@@ -34,7 +34,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.CountDownLatch
-import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
@@ -410,24 +409,21 @@ class MainActivity : AppCompatActivity() {
                 val p1 = rulerPoint1!!.copyOf(); val p2 = pt.copyOf()
                 glView.queueEvent { NativeLib.nativeSetRulerPoints(true, p1, true, p2) }
                 lifecycleScope.launch(Dispatchers.Default) {
-                    val dx = p2[0]-p1[0]; val dy = p2[1]-p1[1]; val dz = p2[2]-p1[2]
-                    val distW = sqrt((dx*dx+dy*dy+dz*dz).toDouble()).toFloat()
-                    var maxMM = 100f
+                    // Picked points are in world space (includes the current global +
+                    // per-mesh transforms).  nativeGetMMPerUnit() returns the CURRENT
+                    // mm-per-world-unit conversion (unitToMM / normalizeScale), so the
+                    // measured distance always reflects the live model size — even
+                    // after the user resizes the model with the Scale/Editor tools.
+                    var mmPerUnit = 1f
                     val latch = CountDownLatch(1)
                     glView.queueEvent {
-                        try { val s=NativeLib.nativeGetModelSizeMM(); maxMM=maxOf(s[3],s[4],s[5]) }
-                        catch(_:Exception){}
+                        try { mmPerUnit = NativeLib.nativeGetMMPerUnit() } catch (_: Exception) {}
                         latch.countDown()
                     }
                     withContext(Dispatchers.IO) { latch.await() }
-                    val normScale = try {
-                        var ns = 1f
-                        val l2 = java.util.concurrent.CountDownLatch(1)
-                        glView.queueEvent { try { ns = NativeLib.nativeGetNormalizeScale() } finally { l2.countDown() } }
-                        withContext(kotlinx.coroutines.Dispatchers.IO) { l2.await(2, java.util.concurrent.TimeUnit.SECONDS) }
-                        ns
-                    } catch (e: Exception) { 1f }
-                    val distMM = if (normScale > 1e-9f) distW / normScale else distW * 100f
+                    val distMM = if (mmPerUnit > 1e-9f)
+                        UnitMath.distanceMM(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2], mmPerUnit)
+                    else UnitMath.distance3D(p1[0], p1[1], p1[2], p2[0], p2[1], p2[2]) * 100f
                     withContext(Dispatchers.Main) {
                         tvRulerInfo?.text = "📏 %.2f mm  (%.2f cm)".format(distMM, distMM/10f)
                     }

@@ -412,6 +412,9 @@ JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidth(J
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiameter(JNIEnv*,jclass,jfloat d){
     LOCK_OR_VOID(); g_renderer->setRingInnerDiameter((float)d);
 }
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingHeight(JNIEnv*,jclass,jfloat h){
+    LOCK_OR_VOID(); g_renderer->setRingHeight((float)h);
+}
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeResetRingDeformation(JNIEnv*,jclass){
     LOCK_OR_VOID(); g_renderer->resetRingDeformation();
 }
@@ -462,9 +465,17 @@ JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingInnerDiamet
     LOCK_OR_VOID();
     g_renderer->setPendingInnerDiameter((float)v);
 }
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingHeightAsync(JNIEnv*,jclass,jfloat v){
+    LOCK_OR_VOID();
+    g_renderer->setPendingHeight((float)v);
+}
 JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetNormalizeScale(JNIEnv*,jclass){
     LOCK_RENDERER();
     return (g_renderer) ? g_renderer->getNormalizeScale() : 1.f;
+}
+JNIEXPORT jfloat JNICALL Java_com_modelviewer3d_NativeLib_nativeGetMMPerUnit(JNIEnv*,jclass){
+    LOCK_RENDERER();
+    return (g_renderer) ? g_renderer->mmPerUnit() : 1.f;
 }
 
 // ── Brush tools ───────────────────────────────────────────────────────────────

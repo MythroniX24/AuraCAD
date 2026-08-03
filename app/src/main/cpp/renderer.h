@@ -61,11 +61,12 @@ struct RingState {
     // Aliases matching analysis result (same as orig after analyze, before deform)
     float innerR      = 0.0f;   // legacy compat
     float outerR      = 0.0f;   // legacy compat
-    float heightAx    = 0.0f;
+    float heightAx    = 0.0f;   // original axial extent (normalized units)
 
     // Live tracking of current deformation state (normalized units)
     float currentInnerR = 0.0f;
     float currentOuterR = 0.0f;
+    float currentHeight = 0.0f;  // current axial extent (normalized units)
 
     bool  valid     = false;
     int   meshIdx   = -1;
@@ -163,6 +164,7 @@ public:
     bool  getRingParams(float out[6]) const;   // [innerRadMM, outerRadMM, bwMM, innerDiaMM, outerDiaMM, heightMM]
     void  setRingBandWidth(float newWidthMM);
     void  setRingInnerDiameter(float newDiamMM);
+    void  setRingHeight(float newHeightMM);
     void  resetRingDeformation();
     bool  isRingAnalyzed() const { return m_ring.valid; }
 
@@ -176,8 +178,20 @@ public:
     void clearRuler();
 
     // Size info
+    // getModelSizeMM  → ORIGINAL size in mm (stored at load, never changes)
+    // getCurrentSizeMM → CURRENT size in mm (world-space bbox incl. transforms)
     void getModelSizeMM(float& w,float& h,float& d) const;
     void getCurrentSizeMM(float& w,float& h,float& d) const;
+
+    // Unit conversion helpers — THE single source of truth for mm↔norm.
+    // mmPerUnit(): mm per 1 normalized unit = unitToMM / normalizeScale
+    // unitPerMM(): normalized units per 1 mm = normalizeScale / unitToMM
+    float mmPerUnit() const {
+        return (m_normalizeScale > 1e-9f) ? (m_unitToMM / m_normalizeScale) : m_unitToMM;
+    }
+    float unitPerMM() const {
+        return (m_unitToMM > 1e-9f) ? (m_normalizeScale / m_unitToMM) : m_normalizeScale;
+    }
 
     // Undo/redo, screenshot, fps
     void pushUndoState(); void undo(); void redo();
@@ -221,6 +235,7 @@ private:
     std::vector<unsigned int> m_rawIndices;
 
     float m_origWmm=1,m_origHmm=1,m_origDmm=1;
+    float m_unitToMM=1.0f;      // 1 for STL/OBJ, 1000 for GLB (meters→mm)
     float m_normalizeScale=1.0f;
 
     float m_colorR=0.72f,m_colorG=0.72f,m_colorB=0.92f;
@@ -258,11 +273,11 @@ private:
     void recomputeBounds(MeshObject& mo);
 
     // applyCombinedRingDeformation: THE authoritative deformation entry point.
-    // Always operates on m_ring.origVerts and applies BOTH bwMM and idMM
-    // simultaneously in a single radial-map pass, so neither parameter can
-    // silently override the other.  Updates currentInnerR/currentOuterR,
-    // regenerates normals, uploads VBO, and rebuilds the bounding box.
-    void applyCombinedRingDeformation(float bwMM, float idMM);
+    // Always operates on m_ring.origVerts and applies bwMM, idMM AND hMM
+    // simultaneously in a single radial+axial map pass, so no parameter can
+    // silently override the others.  Updates currentInnerR/currentOuterR/
+    // currentHeight, regenerates normals, uploads VBO, rebuilds bbox.
+    void applyCombinedRingDeformation(float bwMM, float idMM, float hMM);
 
     // Production-grade mesh separator (reusable, preallocates buffers)
     MeshSeparator m_separator;
@@ -272,11 +287,12 @@ private:
 
     // Full desired deformation state (mm units, GL thread only).
     // Initialized in analyzeRing() to original values.
-    // Updated by setRingBandWidth / setRingInnerDiameter / applyPendingRingDeformation.
-    // Always applied together via applyCombinedRingDeformation so neither
-    // parameter can shadow the other.
+    // Updated by setRingBandWidth / setRingInnerDiameter / setRingHeight /
+    // applyPendingRingDeformation.  Always applied together via
+    // applyCombinedRingDeformation so no parameter can shadow the others.
     float m_desiredBWmm = 0.f;
     float m_desiredIDmm = 0.f;
+    float m_desiredHmm  = 0.f;
 
     // Pending async values posted from the UI thread.
     // Atomic so the UI thread can write without holding g_renderMtx while the
@@ -284,6 +300,7 @@ private:
     // exchanges them to -1 after consuming.
     std::atomic<float> m_pendingBW{-1.f};
     std::atomic<float> m_pendingID{-1.f};
+    std::atomic<float> m_pendingH{-1.f};
     std::atomic<bool>  m_ringDirty{false};
     void applyPendingRingDeformation();
 
@@ -297,6 +314,10 @@ public:
     }
     void setPendingInnerDiameter(float v) {
         m_pendingID.store(v, std::memory_order_relaxed);
+        m_ringDirty.store(true, std::memory_order_release);
+    }
+    void setPendingHeight(float v) {
+        m_pendingH.store(v, std::memory_order_relaxed);
         m_ringDirty.store(true, std::memory_order_release);
     }
 };

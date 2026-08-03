@@ -1,43 +1,86 @@
-# 3D Studio — Enhanced 3D Model Viewer & Editor
+# AuraCAD — 3D Model Viewer & Editor
 
-A professional Android 3D model viewer and editor built with OpenGL ES 3.0 and Kotlin.
+![Build](https://github.com/MythroniX24/AuraCAD/actions/workflows/android.yml/badge.svg)
 
-## New Features (v2.0)
+A professional Android 3D model viewer & editor built with **OpenGL ES 3.0 (C++17)** and **Kotlin**.
+Load, inspect, measure, sculpt, resize and export 3D models — all on your phone, all in real millimetres.
+
+---
+
+## ✨ Features
+
+### 🛠 Modeling Tools
+| Tool | What it does |
+|------|--------------|
+| **Select** | Tap any mesh to pick & highlight it (ray-cast picking). |
+| **Move / Rotate** | Per-mesh transforms with axis handles & sliders. |
+| **Scale** | Per-mesh uniform + per-axis (W/H/D) scaling **in mm**. |
+| **Ruler** | Tap two surface points → live distance in mm. Unit-aware: stays correct after you resize the model. |
+| **Ring** | Auto-detects ring-shaped meshes → resize **inner diameter, band width & height (axial)** with US ring-size presets, proportional mode and live preview. |
+| **Brush** | Smooth / sculpt brushes with mm-precise radius. |
 
 ### 🔷 Mesh Separation
-- Auto-separates disconnected geometry into named mesh islands via Union-Find algorithm (C++)
-- Tap any mesh row to select and highlight it in the viewport (cyan tint)
-- **Eye icon** to toggle per-mesh visibility on/off
-- **Resize individual meshes** independently — W/H/D in mm with optional lock-ratio
-- **Delete individual meshes** with confirmation dialog
-- Vertex count shown per mesh island
+- Auto-splits disconnected geometry into named mesh islands (Union-Find, C++).
+- Per-mesh visibility toggle, per-mesh color coding, independent **W/H/D resize in mm** (with lock-ratio), and delete.
 
 ### 📤 Export & Share
-- **OBJ** and **STL** format export
-- **Save to device** — writes to Documents/3DViewer/
-- **Share via any app** — system share sheet
-- **Direct share** to WhatsApp, Telegram, Email, Google Drive
+- **OBJ** & **STL** export — 1 exported unit = 1 mm (correctly sized files).
+- Save to `Documents/3DViewer/` or share via the system share sheet.
 
-### 📊 Status Bar
-- Live mesh count, total vertex count, and filename shown at the bottom
+### 🧰 Unit System (mm-first)
+- OBJ/STL treated as millimetres; **GLB auto-converts metres → mm**.
+- A single conversion pipeline (`unitToMM` / `normalizeScale` → `mmPerUnit`) drives every dimension readout — model size, mesh size, ruler, ring, brush radius and exports — so **nothing drifts after scaling**.
 
-### 🎨 Enhanced UI / UX
-- Deep dark theme — `#090910` base, `#00D4FF` cyan accent
-- Rounded card-based bottom sheets with glassmorphism hints
-- Colored slider tracks (Red/Green/Blue channels, lighting sliders)
-- Per-mesh color coding in the mesh list
-- Smooth loading states with descriptive sub-text
-- Pill badges for format chips
+### 🎨 UI / UX
+- Deep dark theme (`#090910` base, `#00D4FF` cyan accent), rounded bottom sheets, glassmorphism hints, colored slider tracks, live status bar (mesh / vertex / file).
 
-## Supported Formats
+## 📦 Supported Formats
 | Format | Load | Export |
-|--------|------|--------|
-| OBJ    | ✅   | ✅     |
-| STL    | ✅   | ✅     |
-| GLB    | ✅   | —      |
+|--------|:----:|:------:|
+| OBJ | ✅ | ✅ |
+| STL | ✅ | ✅ |
+| GLB | ✅ | — |
 
-## Build
+## 🧪 Testing
+Pure-JVM unit tests — run anywhere, no device or emulator needed:
+
 ```bash
-./gradlew assembleDebug
+./gradlew testDebugUnitTest
 ```
-Requires NDK r25+ and CMake 3.22+.
+
+Covers the ring sizing math (US ring sizes ↔ mm diameters, band geometry) and the unit-conversion pipeline (`UnitMath`, `RingMath`).
+
+## 🤖 CI — GitHub Actions
+[`.github/workflows/android.yml`](.github/workflows/android.yml) runs on every push to `main` / PR:
+
+1. JDK 17 + Android SDK (platform 34)
+2. NDK `27.0.12077973` + CMake `3.22.1`
+3. `testDebugUnitTest` — unit tests must pass
+4. `assembleDebug` + `assembleRelease` — APK builds
+5. APKs uploaded as **build artifacts**; pushing a `v*` tag also creates a **GitHub Release**
+
+## 🛠 Build Locally
+```bash
+./gradlew assembleDebug        # debug APK
+./gradlew testDebugUnitTest    # unit tests
+```
+
+**Requirements:** JDK 17 · Android SDK (platform 34) · NDK `27.0.12077973` · CMake `3.22.1`
+
+> 💡 Set `sdk.dir` in a local `local.properties` (git-ignored, machine-specific).
+
+## 📁 Project Layout
+```
+app/src/main/cpp/                    C++17 renderer, loader, separator, JNI bridge
+app/src/main/java/com/modelviewer3d/ Kotlin UI, GL surface, tool fragments, math
+app/src/test/java/com/modelviewer3d/ Pure-JVM unit tests
+.github/workflows/android.yml        CI pipeline (tests + APK build)
+```
+
+## 📚 Docs
+- **[AGENTS.md](AGENTS.md)** — conventions for contributors & AI agents working in this repo.
+- **[Knowledge.md](Knowledge.md)** — deep-dive on architecture, the unit system, ruler, ring engine and gotchas.
+
+---
+
+**AuraCAD** · formerly "3D Studio" — an OpenGL ES 3.0 model viewer/editor for Android.

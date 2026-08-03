@@ -106,6 +106,7 @@ object NativeLib {
     external fun nativeGetRingParams(): FloatArray
     external fun nativeSetRingBandWidth(widthMM: Float)
     external fun nativeSetRingInnerDiameter(diamMM: Float)
+    external fun nativeSetRingHeight(heightMM: Float)
     external fun nativeResetRingDeformation()
     external fun nativeIsRingAnalyzed(): Boolean
 
@@ -121,7 +122,10 @@ object NativeLib {
 
     external fun nativeSetRingBandWidthAsync(widthMM: Float)
     external fun nativeSetRingInnerDiameterAsync(diamMM: Float)
+    external fun nativeSetRingHeightAsync(heightMM: Float)
     external fun nativeGetNormalizeScale(): Float
+    /** Current mm per normalized unit — the single conversion for world→mm distances. */
+    external fun nativeGetMMPerUnit(): Float
     external fun nativeExportPLY(path: String): Boolean
     external fun nativeCombineMeshes(indices: IntArray): Boolean
 
