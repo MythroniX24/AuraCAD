@@ -59,12 +59,13 @@ class RingMathTest {
     @Test
     fun `newOuterRadius scales wall when band changes and inner fixed`() {
         // orig innerR=8, outerR=10 (band 2). Double band to 4 with same inner.
+        // new outer radius = new innerR (8) + new band (4) = 12.
         val outer = RingMath.newOuterRadius(
             origInnerR = 8f, origOuterR = 10f,
             newInnerDiaMM = 16f, newBandMM = 4f,
             unitPerMM = 1f
         )
-        assertEquals(14f, outer, eps)
+        assertEquals(12f, outer, eps)
     }
 
     @Test

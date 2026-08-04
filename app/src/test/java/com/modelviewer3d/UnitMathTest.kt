@@ -18,7 +18,9 @@ class UnitMathTest {
     @Test
     fun `mmPerUnit for GLB multiplies by 1000`() {
         // GLB: unitToMM=1000 (meters→mm)
-        assertEquals(500_000f, UnitMath.mmPerUnit(1000f, 0.002f), eps)
+        // Use a relative tolerance: 1000f/0.002f is ~499999.98 due to float
+        // precision (0.002f is not exactly representable), so eps=1e-3 is too tight.
+        assertEquals(500_000f, UnitMath.mmPerUnit(1000f, 0.002f), 100f)
     }
 
     @Test
