@@ -54,37 +54,82 @@ class ExportFragment : BottomSheetDialogFragment() {
 
         root.addView(divider(ctx))
 
-        // ── Format selector ──────────────────────────────────────────────────
+        // ── Format selector — compact single row that EXPANDS on tap ────────
         root.addView(sectionLabel(ctx, "FORMAT"))
-        val fmtRow = LinearLayout(ctx).apply {
+
+        val fmtWrap = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(16, 8, 16, 12)
+            visibility = View.GONE
         }
+        val tvFmtValue = TextView(ctx).apply {
+            text = "Wavefront OBJ · universal"; textSize = 11f
+            setTextColor(Color.parseColor("#00D4FF"))
+        }
+        val tvFmtChevron = TextView(ctx).apply {
+            text = "▾"; textSize = 16f; setTextColor(Color.parseColor("#606080"))
+            setPadding(8, 0, 0, 0)
+        }
+        val fmtHeader = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
+            background = ctx.getDrawable(R.drawable.bg_card_dark)
+            setPadding(16, 14, 16, 14)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(16, 0, 16, 0) }
+            setOnClickListener {
+                val show = fmtWrap.visibility != View.VISIBLE
+                fmtWrap.visibility = if (show) View.VISIBLE else View.GONE
+                tvFmtChevron.text = if (show) "▴" else "▾"
+            }
+        }
+        fmtHeader.addView(TextView(ctx).apply {
+            text = "📦"; textSize = 16f
+            layoutParams = LinearLayout.LayoutParams(36, LinearLayout.LayoutParams.WRAP_CONTENT)
+        })
+        fmtHeader.addView(TextView(ctx).apply {
+            text = "Format"; textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+        })
+        fmtHeader.addView(tvFmtValue)
+        fmtHeader.addView(tvFmtChevron)
+        root.addView(fmtHeader)
 
-        val btnObj = makeFormatBtn(ctx, "OBJ", "Wavefront OBJ\nText format · Universal", "#00D4FF", true)
+        val btnObj = makeFormatBtn(ctx, "OBJ", "Wavefront OBJ\nText · Universal", "#00D4FF", true)
         val btnStl = makeFormatBtn(ctx, "STL", "Stereolithography\nBinary · 3D Printing", "#9090B0", false)
+        val btnPly = makeFormatBtn(ctx, "PLY", "Stanford PLY\nASCII · Meshes + Clouds", "#9090B0", false)
 
-        btnObj.setOnClickListener {
-            selectedFormat = "obj"
-            tintFormatBtn(btnObj, "#00D4FF", true)
-            tintFormatBtn(btnStl, "#9090B0", false)
+        fun applyFmt(fmt: String) {
+            selectedFormat = fmt
+            tintFormatBtn(btnObj, if (fmt == "obj") "#00D4FF" else "#9090B0", fmt == "obj")
+            tintFormatBtn(btnStl, if (fmt == "stl") "#00D4FF" else "#9090B0", fmt == "stl")
+            tintFormatBtn(btnPly, if (fmt == "ply") "#00D4FF" else "#9090B0", fmt == "ply")
+            tvFmtValue.text = when (fmt) {
+                "obj" -> "Wavefront OBJ · universal"
+                "stl" -> "STL binary · 3D printing"
+                else  -> "PLY · meshes & point clouds"
+            }
         }
-        btnStl.setOnClickListener {
-            selectedFormat = "stl"
-            tintFormatBtn(btnStl, "#00D4FF", true)
-            tintFormatBtn(btnObj, "#9090B0", false)
-        }
+        btnObj.setOnClickListener { applyFmt("obj") }
+        btnStl.setOnClickListener { applyFmt("stl") }
+        btnPly.setOnClickListener { applyFmt("ply") }
 
-        fmtRow.addView(btnObj)
-        fmtRow.addView(View(ctx).apply { layoutParams = LinearLayout.LayoutParams(10, 1) })
-        fmtRow.addView(btnStl)
-        root.addView(fmtRow)
+        fmtWrap.addView(btnObj)
+        fmtWrap.addView(View(ctx).apply { layoutParams = LinearLayout.LayoutParams(10, 1) })
+        fmtWrap.addView(btnStl)
+        fmtWrap.addView(View(ctx).apply { layoutParams = LinearLayout.LayoutParams(10, 1) })
+        fmtWrap.addView(btnPly)
+        root.addView(fmtWrap)
 
         root.addView(divider(ctx))
 
         // ── Save to Device ───────────────────────────────────────────────────
         root.addView(sectionLabel(ctx, "SAVE TO DEVICE"))
-        root.addView(makeBigActionBtn(ctx, "💾", "Save to Downloads", "Saves in Documents/3DViewer", "#1A3D50", "#00D4FF") {
+        root.addView(makeBigActionBtn(ctx, "💾", "Save to Downloads", "Saves in Downloads/AuraCAD", "#1A3D50", "#00D4FF") {
             (activity as? MainActivity)?.exportModel(selectedFormat, share = false)
             dismiss()
         })

@@ -117,7 +117,7 @@ class SeparationService : Service() {
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_gallery)
-            .setContentTitle("3D Studio — Mesh Separation")
+            .setContentTitle("AuraCAD — Mesh Separation")
             .setContentText(text)
             .setContentIntent(pendingIntent)
             .setOngoing(progress < 100)
@@ -142,7 +142,7 @@ class SeparationService : Service() {
     private fun createNotificationChannel() {
         val chan = NotificationChannel(
             CHANNEL_ID,
-            "Mesh Separation",
+            "AuraCAD Mesh Separation",
             NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Shows progress while separating 3D mesh islands"

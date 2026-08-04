@@ -14,6 +14,12 @@ struct TransformState {
     float scaX=1,scaY=1,scaZ=1;
 };
 
+struct MeshTransformState {
+    float rotX=0,rotY=0,rotZ=0;
+    float posX=0,posY=0,posZ=0;
+    float scaX=1,scaY=1,scaZ=1;
+};
+
 struct MeshObject {
     std::string name;
     std::vector<Vertex>       vertices;
@@ -34,6 +40,21 @@ struct MeshObject {
     // and kept up-to-date by recomputeBounds() after every deformation.
     float bboxMin[3] = { 0.f, 0.f, 0.f };
     float bboxMax[3] = { 0.f, 0.f, 0.f };
+};
+
+// One undoable action: global + per-mesh transforms, plus (optionally) a
+// vertex snapshot of a single mesh (deformation tools) and/or a full copy of
+// a deleted mesh so deletion can be undone.
+// NOTE: declared AFTER MeshObject — UndoEntry stores one by value.
+struct UndoEntry {
+    TransformState global;
+    std::vector<MeshTransformState> meshes;
+    int vertMeshIdx = -1;        // mesh whose vertices were snapshotted
+    std::vector<Vertex> verts;   // before-state of that mesh
+    bool hasDeletedMesh = false; // deleteMesh undo payload
+    bool meshAbsent     = false; // true = state already has the mesh removed (redo of delete)
+    int  deletedMeshIdx = -1;
+    MeshObject deleted;          // full copy for re-insertion
 };
 
 
@@ -93,6 +114,8 @@ public:
     void takeRawData(std::vector<Vertex>& verts, std::vector<uint32_t>& idx);
     bool loadSeparatedComponents(std::vector<MeshComponent>& comps);
     bool isSeparated() const { return m_isSeparated; }
+    /** Skip islands with fewer than [n] faces when uploading separated meshes. */
+    void setSeparationMinFaces(int n) { m_sepMinFaces = (n < 1) ? 1 : n; }
 
     // EGL context loss recovery — called from GL thread on Renderer.onSurfaceCreated
     // when contextInitialized==true (the new context invalidated all GL handles).
@@ -171,6 +194,10 @@ public:
     // Export
     bool exportOBJ(const std::string& path) const;
     bool exportSTL(const std::string& path) const;
+    bool exportPLY(const std::string& path) const;
+
+    /** Merge [indices] meshes into a single mesh (originals removed). */
+    bool combineMeshes(const std::vector<int>& indices);
 
     // Ruler
     bool pickPoint(float sx,float sy,float sw,float sh,float out[3]);
@@ -194,7 +221,15 @@ public:
     }
 
     // Undo/redo, screenshot, fps
-    void pushUndoState(); void undo(); void redo();
+    void pushUndoState();
+    /** Global + per-mesh transforms AND a vertex snapshot of mesh [idx]
+     *  (for brush, ring, decimate, weld, cleanup). */
+    void pushMeshUndo(int idx);
+    /** Full copy of mesh [idx] so a delete can be undone. */
+    void pushDeleteUndo(int idx);
+    void undo(); void redo();
+    bool canUndo() const { return !m_undoStack.empty(); }
+    bool canRedo() const { return !m_redoStack.empty(); }
     std::vector<uint8_t> takeScreenshot();
     float getFPS() const { return m_fps; }
     TransformState getTransform() const;
@@ -217,6 +252,7 @@ private:
     int  m_selectedMesh = -1;
     bool m_hasModel     = false;
     bool m_isSeparated  = false;
+    int  m_sepMinFaces  = 1;
 
     int m_width=1, m_height=1;
 
@@ -247,8 +283,11 @@ private:
     bool  m_rulerHasP1=false, m_rulerHasP2=false;
     float m_rulerP1[3]={}, m_rulerP2[3]={};
 
-    static constexpr int MAX_UNDO=50;
-    std::vector<TransformState> m_undoStack, m_redoStack;
+    static constexpr int MAX_UNDO=30;
+    std::vector<UndoEntry> m_undoStack, m_redoStack;
+
+    UndoEntry captureState() const;
+    void restoreState(const UndoEntry& e);
 
     void buildShaders();
     void buildBoundingBox();

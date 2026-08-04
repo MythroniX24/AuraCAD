@@ -153,7 +153,37 @@ class MeshListFragment : BottomSheetDialogFragment() {
 
         card.addView(TextView(ctx).apply {
             text = "⚠ Large models may take a minute"
-            textSize = 10f; setTextColor(Color.parseColor("#805050")); setPadding(0, 12, 0, 12)
+            textSize = 10f; setTextColor(Color.parseColor("#805050")); setPadding(0, 12, 0, 4)
+        })
+
+        // ── Island filter: drop tiny dust islands after separation ──────────
+        card.addView(TextView(ctx).apply {
+            text = "Skip islands smaller than"; textSize = 10f
+            setTextColor(Color.parseColor("#606080"))
+        })
+        val tvMinFaces = TextView(ctx).apply {
+            text = "1 face  ·  keep everything"; textSize = 10f
+            setTextColor(Color.parseColor("#00D4FF")); setPadding(0, 2, 0, 4)
+        }
+        card.addView(tvMinFaces)
+        card.addView(SeekBar(ctx).apply {
+            max = 999; progress = 0
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+            setPadding(0, 0, 0, 6)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(b: SeekBar, p: Int, fromUser: Boolean) {
+                    if (!fromUser) return
+                    val n = p + 1
+                    tvMinFaces.text = if (n == 1) "1 face  ·  keep everything"
+                                     else "$n faces  ·  drops tiny dust islands"
+                    (activity as? MainActivity)?.glView?.queueEvent {
+                        NativeLib.nativeSetSeparationMinFaces(n)
+                    }
+                }
+                override fun onStartTrackingTouch(b: SeekBar) {}
+                override fun onStopTrackingTouch(b: SeekBar) {}
+            })
         })
 
         val btn = Button(ctx).apply {
@@ -327,6 +357,37 @@ class MeshListFragment : BottomSheetDialogFragment() {
             listContainer?.addView(buildMeshRow(ctx, i))
             listContainer?.addView(View(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 6)
+            })
+        }
+
+        // ── Combine everything back into one mesh ────────────────────────────
+        if (isSeparated && meshCount > 1) {
+            listContainer?.addView(Button(ctx).apply {
+                text = "⊕  Combine All into One Mesh"
+                textSize = 12f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(Color.parseColor("#4CAF82"))
+                background = ctx.getDrawable(R.drawable.bg_card_dark)
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, 50
+                ).apply { setMargins(0, 16, 0, 4) }
+                setOnClickListener {
+                    val indices = IntArray(meshCount) { it }
+                    val glv = (activity as? MainActivity)?.glView ?: return@setOnClickListener
+                    glv.queueEvent {
+                        val ok = NativeLib.nativeCombineMeshes(indices)
+                        activity?.runOnUiThread {
+                            if (ok) {
+                                toast("✅ Combined $meshCount meshes into one")
+                                isSeparated = false
+                                refreshState(ctx)
+                                (activity as? MainActivity)?.updateStatusBar()
+                            } else {
+                                toast("Combine failed")
+                            }
+                        }
+                    }
+                }
             })
         }
     }

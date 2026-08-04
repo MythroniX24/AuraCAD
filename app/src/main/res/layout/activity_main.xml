@@ -171,7 +171,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="3D Studio"
+            android:text="AuraCAD"
             android:textColor="@color/text_primary"
             android:textSize="20sp"
             android:textStyle="bold"

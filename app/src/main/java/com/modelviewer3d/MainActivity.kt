@@ -1,6 +1,9 @@
 package com.modelviewer3d
 
 import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.Intent
 import android.content.ContentValues
 import android.content.pm.PackageManager
@@ -10,20 +13,28 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.PowerManager
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.content.BroadcastReceiver
 import android.content.IntentFilter
 import android.view.View
 import android.view.WindowManager
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
+import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -85,11 +96,22 @@ class MainActivity : AppCompatActivity() {
     private var rulerActive = false
     private var currentFileName = ""
 
+    // App-scoped loader — deliberately NOT lifecycleScope: if the user presses
+    // back / backgrounds the app mid-load, parsing keeps running and a
+    // notification announces completion.  lifecycleScope would cancel the job.
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var loadingInBackground = false
+
+    private var btnUndo: View? = null
+    private var btnRedo: View? = null
+
     private val filePicker = registerForActivityResult(ActivityResultContracts.OpenDocument())
     { uri -> uri?.let { openModelFromUri(it) } }
 
     private val permLauncher = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions())
     { r -> if (r.values.all { it }) launchFilePicker() else toast("Storage permission required") }
+
+    private val notifPermLauncher = registerForActivityResult(ActivityResultContracts.RequestPermission()) {}
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -156,9 +178,24 @@ class MainActivity : AppCompatActivity() {
             findViewById<View>(R.id.btnScreenshot).setOnClickListener { takeScreenshot() }
 
             // ── Top-bar primary actions ──────────────────────────────────────
-            findViewById<View>(R.id.btnUndo).setOnClickListener  { glView.queueEvent { NativeLib.nativeUndo() } }
-            findViewById<View>(R.id.btnRedo).setOnClickListener  { glView.queueEvent { NativeLib.nativeRedo() } }
+            btnUndo = findViewById(R.id.btnUndo)
+            btnRedo = findViewById(R.id.btnRedo)
+            btnUndo?.setOnClickListener  {
+                glView.queueEvent { NativeLib.nativeUndo(); refreshUndoRedoButtons() }
+            }
+            btnRedo?.setOnClickListener  {
+                glView.queueEvent { NativeLib.nativeRedo(); refreshUndoRedoButtons() }
+            }
             findViewById<View>(R.id.btnReset).setOnClickListener { glView.queueEvent { NativeLib.nativeResetCamera() } }
+
+            // Dim/enable undo+redo according to the native stacks. Polled because
+            // nearly every tool pushes state from the GL thread.
+            lifecycleScope.launch {
+                while (isActive) {
+                    refreshUndoRedoButtons()
+                    delay(600)
+                }
+            }
 
             // ── AI Assistant button ──────────────────────────────────────────
             btnAi = findViewById(R.id.btnAi)
@@ -200,6 +237,22 @@ class MainActivity : AppCompatActivity() {
                 @Suppress("UnspecifiedRegisterReceiverFlag")
                 registerReceiver(separationCpuDoneReceiver, sepFilter)
             }
+
+            // Back = background the app while a model is loading; the parse keeps
+            // running on appScope and a notification fires on completion.
+            onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+                override fun handleOnBackPressed() {
+                    if (loadingOverlay?.visibility == View.VISIBLE) {
+                        loadingInBackground = true
+                        hideLoading()
+                        notifyLoad("AuraCAD", "Loading $currentFileName in background…", progress = true)
+                        moveTaskToBack(true)
+                    } else {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                    }
+                }
+            })
 
             // Handle: opened via file manager (ACTION_VIEW)
             if (intent?.action == Intent.ACTION_VIEW) {
@@ -251,6 +304,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 5, 4, "Screenshot")
         popup.menu.add(0, 6, 5, "Export…")
         popup.menu.add(0, 7, 6, "✨ AI Assistant")
+        popup.menu.add(0, 8, 7, "🔋 Battery Optimization")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> findViewById<View>(R.id.btnOpen).performClick()
@@ -260,6 +314,7 @@ class MainActivity : AppCompatActivity() {
                 5 -> findViewById<View>(R.id.btnScreenshot).performClick()
                 6 -> findViewById<View>(R.id.btnExport).performClick()
                 7 -> openAiSettings()
+                8 -> requestBatteryOptimizationExemption()
             }
             true
         }
@@ -394,6 +449,75 @@ class MainActivity : AppCompatActivity() {
         else           -> n.toString()
     }
 
+    // ── Undo/Redo availability feedback ──────────────────────────────────────
+    private fun refreshUndoRedoButtons() {
+        val u = try { NativeLib.nativeCanUndo() } catch (_: Exception) { false }
+        val r = try { NativeLib.nativeCanRedo() } catch (_: Exception) { false }
+        runOnUiThread {
+            btnUndo?.alpha = if (u) 1f else 0.28f
+            btnRedo?.alpha = if (r) 1f else 0.28f
+        }
+    }
+
+    // ── Background-load notifications ────────────────────────────────────────
+    private fun ensureNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= 26) {
+            val chan = NotificationChannel(
+                "aura_load", "AuraCAD", NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Model loading progress"
+                setShowBadge(false); enableVibration(false); setSound(null, null)
+            }
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                .createNotificationChannel(chan)
+        }
+    }
+
+    private fun notifyLoad(title: String, text: String, progress: Boolean = false) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED) return
+        ensureNotificationChannel()
+        val pi = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val nb = NotificationCompat.Builder(this, "aura_load")
+            .setSmallIcon(android.R.drawable.ic_menu_gallery)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setContentIntent(pi)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+        if (progress) nb.setProgress(100, 0, true).setOngoing(true)
+        try {
+            (getSystemService(NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(9090, nb.build())
+        } catch (_: Exception) {}
+    }
+
+    // ── Battery optimization ─────────────────────────────────────────────────
+    private fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= 23) {
+            val pm = getSystemService(POWER_SERVICE) as PowerManager
+            if (pm.isIgnoringBatteryOptimizations(packageName)) {
+                toast("Already exempt from battery optimization")
+            } else {
+                try {
+                    startActivity(Intent(
+                        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:$packageName")))
+                } catch (_: Exception) {
+                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            }
+        } else {
+            toast("Not needed on this Android version")
+        }
+    }
+
     // ── Ruler ─────────────────────────────────────────────────────────────────
     private fun toggleRulerMode() {
         rulerActive = !rulerActive
@@ -454,7 +578,7 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Export model to OBJ or STL.
-     * - share=false → saves to Downloads/3DViewer/ (visible in Files app, no permission needed)
+     * - share=false → saves to Downloads/AuraCAD/ (visible in Files app, no permission needed)
      * - share=true  → exports to cache then shares via system chooser
      */
     fun exportModel(format: String, share: Boolean, shareApp: String? = null) {
@@ -476,6 +600,7 @@ class MainActivity : AppCompatActivity() {
                         val mimeType = when(format) {
                             "obj" -> "model/obj"
                             "stl" -> "model/stl"
+                            "ply" -> "model/ply"
                             else  -> "application/octet-stream"
                         }
                         val intent = Intent(Intent.ACTION_SEND).apply {
@@ -511,11 +636,11 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Android 10+ (API 29+): Insert into MediaStore.Downloads.
-     * File appears in: Files → Downloads → 3DViewer/
+     * File appears in: Files → Downloads → AuraCAD/
      * No permission required.
      */
     private suspend fun saveToMediaStoreDownloads(fileName: String, format: String) {
-        val mimeType = when(format) { "obj" -> "model/obj"; "stl" -> "model/stl"; else -> "application/octet-stream" }
+        val mimeType = when(format) { "obj" -> "model/obj"; "stl" -> "model/stl"; "ply" -> "model/ply"; else -> "application/octet-stream" }
 
         // Write native export to cache first (native needs a real file path)
         val cacheFile = File(cacheDir, fileName)
@@ -529,7 +654,7 @@ class MainActivity : AppCompatActivity() {
             val values = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, fileName)
                 put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(MediaStore.Downloads.RELATIVE_PATH, "Download/3DViewer")
+                put(MediaStore.Downloads.RELATIVE_PATH, "Download/AuraCAD")
                 put(MediaStore.Downloads.IS_PENDING, 1)
             }
             val resolver = contentResolver
@@ -545,7 +670,7 @@ class MainActivity : AppCompatActivity() {
                 resolver.update(itemUri, values, null, null)
                 cacheFile.delete()
                 withContext(Dispatchers.Main) {
-                    toast("✅ Saved to Downloads/3DViewer/$fileName")
+                    toast("✅ Saved to Downloads/AuraCAD/$fileName")
                 }
             } else {
                 // MediaStore insert failed → fall back to app external storage
@@ -560,29 +685,29 @@ class MainActivity : AppCompatActivity() {
      * Android 9 and below: write to public Downloads directly.
      */
     private suspend fun saveToPublicDownloads(fileName: String, format: String) {
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "3DViewer")
+        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AuraCAD")
         dir.mkdirs()
         val outFile = File(dir, fileName)
         val ok = runExportNative(format, outFile)
         withContext(Dispatchers.Main) {
             if (!ok) { toast("Export failed"); return@withContext }
             MediaScannerConnection.scanFile(this@MainActivity, arrayOf(outFile.absolutePath), null, null)
-            toast("✅ Saved to Downloads/3DViewer/$fileName")
+            toast("✅ Saved to Downloads/AuraCAD/$fileName")
         }
     }
 
     /**
      * Fallback: save to app-specific external storage (always works, visible in file managers).
-     * Path: /sdcard/Android/data/com.modelviewer3d/files/3DViewer/
+     * Path: /sdcard/Android/data/com.modelviewer3d/files/AuraCAD/
      */
     private suspend fun saveFallback(fileName: String, format: String, cacheFile: File) {
-        val dir = File(getExternalFilesDir(null), "3DViewer")
+        val dir = File(getExternalFilesDir(null), "AuraCAD")
         dir.mkdirs()
         val outFile = File(dir, fileName)
         cacheFile.copyTo(outFile, overwrite = true)
         cacheFile.delete()
         withContext(Dispatchers.Main) {
-            toast("✅ Saved to Android/data/com.modelviewer3d/files/3DViewer/$fileName")
+            toast("✅ Saved to Android/data/com.modelviewer3d/files/AuraCAD/$fileName")
         }
     }
 
@@ -598,6 +723,7 @@ class MainActivity : AppCompatActivity() {
                 ok = when (format) {
                     "obj" -> NativeLib.nativeExportOBJ(outFile.absolutePath)
                     "stl" -> NativeLib.nativeExportSTL(outFile.absolutePath)
+                    "ply" -> NativeLib.nativeExportPLY(outFile.absolutePath)
                     else  -> false
                 }
             } catch (_: Exception) {}
@@ -625,14 +751,26 @@ class MainActivity : AppCompatActivity() {
     private fun launchFilePicker() {
         filePicker.launch(arrayOf(
             "*/*",
-            "model/stl", "model/obj", "model/gltf-binary",
+            "model/stl", "model/obj", "model/gltf-binary", "model/gltf+json",
+            "model/ply", "model/x-3ds", "application/x-3ds",
             "application/octet-stream"
         ))
     }
 
     fun openModelFromUri(uri: Uri) {
-        lifecycleScope.launch(Dispatchers.IO) {
+        // appScope (NOT lifecycleScope) — survives back-press/backgrounding so
+        // heavy models keep loading in the background with a completion
+        // notification.
+        appScope.launch(Dispatchers.IO) {
             try {
+                // Ask for notification permission upfront (Android 13+)
+                withContext(Dispatchers.Main) {
+                    if (Build.VERSION.SDK_INT >= 33) {
+                        val nm = getSystemService(NOTIFICATION_SERVICE) as NotificationManager
+                        if (!nm.areNotificationsEnabled())
+                            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                    }
+                }
                 // Resolve the display name from the URI
                 var name = resolveFileName(uri)
 
@@ -649,9 +787,19 @@ class MainActivity : AppCompatActivity() {
                 if (!hasKnownExtension(name)) name = "model.stl"
 
                 currentFileName = name
+
+                // 3DM (Rhino) needs the huge proprietary openNURBS toolkit — not
+                // bundled. Fail gracefully instead of showing a parse error.
+                if (name.lowercase().endsWith(".3dm")) {
+                    withContext(Dispatchers.Main) {
+                        toast("3DM (Rhino) needs openNURBS and isn't bundled. Please export the model to STL / OBJ / PLY / 3DS first.")
+                    }
+                    return@launch
+                }
+
                 // Delete old cached model files to prevent storage bloat
                 cacheDir.listFiles { f -> f.extension.lowercase() in
-                    setOf("stl","obj","glb","gltf","ply","3mf","fbx","dae") }
+                    setOf("stl","obj","glb","gltf","ply","3ds","3mf","fbx","dae") }
                     ?.forEach { it.delete() }
 
                 val dest = File(cacheDir, name)
@@ -683,12 +831,23 @@ class MainActivity : AppCompatActivity() {
                     latch.countDown()
                 }
                 latch.await()
+                val wasBackgrounded = loadingInBackground
                 withContext(Dispatchers.Main) {
                     hideLoading()
-                    if (uploadOk) { toast("✓ $name loaded"); updateStatusBar() }
-                    else toast("GPU upload failed")
+                    loadingInBackground = false
+                    if (uploadOk) {
+                        if (wasBackgrounded || isFinishing) {
+                            notifyLoad("AuraCAD", "✅ $name loaded — tap to view")
+                        } else {
+                            toast("✓ $name loaded")
+                        }
+                        updateStatusBar()
+                    } else {
+                        toast("GPU upload failed")
+                    }
                 }
             } catch (e: Exception) {
+                loadingInBackground = false
                 withContext(Dispatchers.Main) { hideLoading(); toast("Error: ${e.message}") }
             }
         }
@@ -696,13 +855,17 @@ class MainActivity : AppCompatActivity() {
 
     private fun hasKnownExtension(name: String): Boolean {
         val low = name.lowercase()
-        return low.endsWith(".obj") || low.endsWith(".stl") || low.endsWith(".glb")
+        return low.endsWith(".obj") || low.endsWith(".stl") || low.endsWith(".glb") ||
+               low.endsWith(".gltf") || low.endsWith(".ply") || low.endsWith(".3ds")
     }
 
     private fun mimeToExtension(mime: String): String = when {
-        "stl" in mime || mime == "model/stl"          -> "stl"
-        "obj" in mime || mime == "model/obj"           -> "obj"
-        "gltf" in mime || mime == "model/gltf-binary"  -> "glb"
+        "stl" in mime || mime == "model/stl"           -> "stl"
+        "obj" in mime || mime == "model/obj"            -> "obj"
+        "gltf-binary" in mime || mime == "model/gltf-binary" -> "glb"
+        "gltf+json" in mime || mime == "model/gltf+json" -> "gltf"
+        "ply" in mime || mime == "model/ply"            -> "ply"
+        "3ds" in mime                                    -> "3ds"
         else -> ""
     }
 
@@ -815,17 +978,17 @@ class MainActivity : AppCompatActivity() {
         val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, "3DViewer_$ts.png")
+                put(MediaStore.Images.Media.DISPLAY_NAME, "AuraCAD_$ts.png")
                 put(MediaStore.Images.Media.MIME_TYPE, "image/png")
-                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/3DViewer")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/AuraCAD")
             }
             val uri = contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
             uri?.let { contentResolver.openOutputStream(it)?.use { s -> bmp.compress(Bitmap.CompressFormat.PNG, 100, s) } }
             null  // no File object for MediaStore saves, toast handled outside
         } else {
-            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "3DViewer")
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES), "AuraCAD")
             dir.mkdirs()
-            val f = File(dir, "3DViewer_$ts.png")
+            val f = File(dir, "AuraCAD_$ts.png")
             FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
             MediaScannerConnection.scanFile(this, arrayOf(f.absolutePath), null, null)
             f

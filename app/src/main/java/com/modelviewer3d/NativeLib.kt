@@ -25,6 +25,8 @@ object NativeLib {
     external fun nativePerformSeparationGPU(): Boolean
     external fun nativeIsSeparated(): Boolean
     external fun nativeGetSeparationProgress(): Int
+    /** Islands smaller than [n] faces are dropped when separation completes. */
+    external fun nativeSetSeparationMinFaces(n: Int)
 
     // Camera
     external fun nativeTouchRotate(dx: Float, dy: Float)
@@ -57,6 +59,8 @@ object NativeLib {
     external fun nativePushUndoState()
     external fun nativeUndo()
     external fun nativeRedo()
+    external fun nativeCanUndo(): Boolean
+    external fun nativeCanRedo(): Boolean
 
     // Stats
     external fun nativeGetFPS(): Float

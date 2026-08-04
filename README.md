@@ -24,11 +24,11 @@ Load, inspect, measure, sculpt, resize and export 3D models — all on your phon
 - Per-mesh visibility toggle, per-mesh color coding, independent **W/H/D resize in mm** (with lock-ratio), and delete.
 
 ### 📤 Export & Share
-- **OBJ** & **STL** export — 1 exported unit = 1 mm (correctly sized files).
+- **OBJ**, **STL** & **PLY** export — 1 exported unit = 1 mm (correctly sized files).
 - Save to `Documents/3DViewer/` or share via the system share sheet.
 
 ### 🧰 Unit System (mm-first)
-- OBJ/STL treated as millimetres; **GLB auto-converts metres → mm**.
+- OBJ/STL/PLY/3DS treated as millimetres; **GLB auto-converts metres → mm**. Binary STL is vertex-deduped at load for big-model performance.
 - A single conversion pipeline (`unitToMM` / `normalizeScale` → `mmPerUnit`) drives every dimension readout — model size, mesh size, ruler, ring, brush radius and exports — so **nothing drifts after scaling**.
 
 ### 🎨 UI / UX
@@ -40,6 +40,10 @@ Load, inspect, measure, sculpt, resize and export 3D models — all on your phon
 | OBJ | ✅ | ✅ |
 | STL | ✅ | ✅ |
 | GLB | ✅ | — |
+| PLY (ASCII + binary LE) | ✅ | ✅ |
+| 3DS (legacy 3D Studio) | ✅ | — |
+| GLTF (JSON) | ✅ | — |
+| 3DM (Rhino) | ⛔ needs openNURBS — graceful message | — |
 
 ## 🧪 Testing
 Pure-JVM unit tests — run anywhere, no device or emulator needed:

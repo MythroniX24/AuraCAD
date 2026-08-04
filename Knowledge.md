@@ -21,7 +21,7 @@ Kotlin UI  ──JNI──►  jni_bridge.cpp  ──►  Renderer (C++17, rende
 ## 2. The unit system — mm correctness (READ THIS FIRST)
 
 ### Coordinate pipeline
-1. **Parse**: OBJ/STL → 1 file unit = 1 mm (`unitToMM = 1`). GLB → metres are converted to mm (`unitToMM = 1000`).
+1. **Parse**: OBJ/STL/PLY/3DS → 1 file unit = 1 mm (`unitToMM = 1`). GLB → metres are converted to mm (`unitToMM = 1000`).
 2. **Normalize**: the model is normalized to span ≈ 2 units → `normalizeScale = 2 / maxFileExtent`.
 3. **World/GPU space** is in normalized units (camera fits the model).
 4. **User-facing mm** is recovered with:

@@ -183,11 +183,24 @@ JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetBoundingBox(JNI
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativePushUndoState(JNIEnv*,jclass){
     LOCK_OR_VOID(); g_renderer->pushUndoState();
 }
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetSeparationMinFaces(JNIEnv*,jclass,jint n){
+    LOCK_OR_VOID(); if(g_renderer) g_renderer->setSeparationMinFaces((int)n);
+}
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeUndo(JNIEnv*,jclass){
     LOCK_OR_VOID(); g_renderer->undo();
 }
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeRedo(JNIEnv*,jclass){
     LOCK_OR_VOID(); g_renderer->redo();
+}
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeCanUndo(JNIEnv*,jclass){
+    LOCK_RENDERER();
+    if(!g_renderer) return JNI_FALSE;
+    return g_renderer->canUndo() ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeCanRedo(JNIEnv*,jclass){
+    LOCK_RENDERER();
+    if(!g_renderer) return JNI_FALSE;
+    return g_renderer->canRedo() ? JNI_TRUE : JNI_FALSE;
 }
 
 // ── Stats ────────────────────────────────────────────────────────────────────
@@ -324,7 +337,7 @@ JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeResetMeshTransform
     g_renderer->resetMeshTransform((int)idx);
 }
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeDeleteMesh(JNIEnv*,jclass,jint idx){
-    LOCK_OR_VOID(); g_renderer->pushUndoState(); g_renderer->deleteMesh((int)idx);
+    LOCK_OR_VOID(); g_renderer->pushDeleteUndo((int)idx); g_renderer->deleteMesh((int)idx);
 }
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetMeshVisible(JNIEnv*,jclass,jint idx,jboolean v){
     LOCK_OR_VOID(); g_renderer->setMeshVisible((int)idx,v==JNI_TRUE);
@@ -508,6 +521,20 @@ JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeApplySculpt(
                                    (float)cx, (float)cy, (float)cz,
                                    (float)radius, (float)amount)
            ? JNI_TRUE : JNI_FALSE;
+}
+
+// ── Combine meshes ───────────────────────────────────────────────────────────
+// indices: int[] of mesh indices to merge into one mesh (originals removed).
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeCombineMeshes(
+        JNIEnv* env, jclass, jintArray indices)
+{
+    LOCK_OR_FALSE();
+    if(!g_renderer) return JNI_FALSE;
+    jsize n = indices ? env->GetArrayLength(indices) : 0;
+    if(n<2) return JNI_FALSE;
+    std::vector<int> v((size_t)n);
+    env->GetIntArrayRegion(indices, 0, n, v.data());
+    return g_renderer->combineMeshes(v) ? JNI_TRUE : JNI_FALSE;
 }
 
 } // extern "C"

@@ -672,6 +672,7 @@ bool Renderer::loadSeparatedComponents(std::vector<MeshComponent>& comps){
     for(int i=0;i<(int)comps.size();++i){
         auto& comp = comps[i];
         if(comp.vertices.empty()) continue;
+        if((int)comp.faceCount < m_sepMinFaces) continue;  // island filter: skip dust
         MeshObject mo;
         mo.name   = "Mesh_" + std::to_string(i+1);
         mo.colorR = kColors[i%NC][0];
@@ -896,7 +897,7 @@ static Vec3 applyMat4Normal(const Mat4& mat, float nx, float ny, float nz) {
 bool Renderer::exportOBJ(const std::string& path) const {
     std::ofstream f(path);
     if(!f) return false;
-    f << "# Exported by 3D Model Viewer\n";
+    f << "# Exported by AuraCAD\n";
     f << std::fixed; f.precision(6);
 
     Mat4 global = buildGlobalMatrix();
@@ -942,7 +943,7 @@ bool Renderer::exportSTL(const std::string& path) const {
     uint32_t total = 0;
     for(const auto& mo : m_meshes) if(mo.visible) total += (uint32_t)(mo.indices.size()/3);
 
-    char header[80] = "3D Model Viewer Export";
+    char header[80] = "AuraCAD Export";
     f.write(header, 80);
     f.write(reinterpret_cast<const char*>(&total), 4);
 
@@ -979,6 +980,93 @@ bool Renderer::exportSTL(const std::string& path) const {
             f.write(reinterpret_cast<const char*>(&att), 2);
         }
     }
+    return true;
+}
+
+bool Renderer::exportPLY(const std::string& path) const {
+    std::ofstream f(path);
+    if(!f) return false;
+    f << "ply\nformat ascii 1.0\ncomment Exported by AuraCAD\n";
+
+    Mat4 global = buildGlobalMatrix();
+    size_t totalV=0, totalI=0;
+    for(const auto& mo : m_meshes) if(mo.visible){ totalV+=mo.vertices.size(); totalI+=mo.indices.size(); }
+    if(totalV==0 || totalI==0) return false;
+
+    f << "element vertex " << totalV << "\n";
+    f << "property float x\nproperty float y\nproperty float z\n";
+    f << "property float nx\nproperty float ny\nproperty float nz\n";
+    f << "element face " << (totalI/3) << "\n";
+    f << "property list uchar int vertex_indices\n";
+    f << "end_header\n";
+
+    float toMM = mmPerUnit();
+    Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
+    f << std::fixed; f.precision(6);
+    for(const auto& mo : m_meshes){
+        if(!mo.visible) continue;
+        Mat4 model = global * buildMeshMatrix(mo) * mmConv;
+        for(const auto& v : mo.vertices){
+            Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
+            Vec3 n = applyMat4Normal(model, v.nx, v.ny, v.nz);
+            f << p.x << " " << p.y << " " << p.z << " "
+              << n.x << " " << n.y << " " << n.z << "\n";
+        }
+    }
+    size_t base = 0;
+    for(const auto& mo : m_meshes){
+        if(!mo.visible) continue;
+        for(size_t i=0;i+2<mo.indices.size();i+=3)
+            f << "3 " << (mo.indices[i]+(unsigned int)base) << " "
+              << (mo.indices[i+1]+(unsigned int)base) << " "
+              << (mo.indices[i+2]+(unsigned int)base) << "\n";
+        base += mo.vertices.size();
+    }
+    return true;
+}
+
+// ── Combine meshes ───────────────────────────────────────────────────────────
+bool Renderer::combineMeshes(const std::vector<int>& indices){
+    std::vector<int> idxs;
+    for(int i : indices){
+        if(i>=0 && i<(int)m_meshes.size() &&
+           std::find(idxs.begin(), idxs.end(), i)==idxs.end()) idxs.push_back(i);
+    }
+    if(idxs.size()<2) return false;
+
+    pushUndoState();
+
+    MeshObject merged;
+    merged.name = "Combined_" + std::to_string((int)idxs.size()) + "M";
+    size_t base = 0;
+    for(int i : idxs){
+        const MeshObject& mo = m_meshes[i];
+        if(mo.vertices.empty()) continue;
+        merged.vertices.insert(merged.vertices.end(), mo.vertices.begin(), mo.vertices.end());
+        for(unsigned int idx : mo.indices)
+            merged.indices.push_back((unsigned int)(idx + base));
+        base += mo.vertices.size();
+    }
+    if(merged.vertices.empty()) return false;
+    merged.colorR = m_meshes[idxs[0]].colorR;
+    merged.colorG = m_meshes[idxs[0]].colorG;
+    merged.colorB = m_meshes[idxs[0]].colorB;
+
+    // Free GL objects of the originals, then remove them (descending so the
+    // smaller indices stay valid while erasing).
+    for(int i : idxs){
+        auto& mo = m_meshes[i];
+        if(mo.vao) glDeleteVertexArrays(1,&mo.vao);
+        if(mo.vbo) glDeleteBuffers(1,&mo.vbo);
+        if(mo.ibo) glDeleteBuffers(1,&mo.ibo);
+    }
+    int insertAt = *std::min_element(idxs.begin(), idxs.end());
+    std::sort(idxs.begin(), idxs.end(), std::greater<int>());
+    for(int i : idxs) m_meshes.erase(m_meshes.begin()+i);
+
+    uploadMeshObject(merged);
+    m_meshes.insert(m_meshes.begin()+insertAt, std::move(merged));
+    m_selectedMesh = insertAt;
     return true;
 }
 
@@ -2111,27 +2199,133 @@ void Renderer::setRulerPoints(bool h1,float* p1,bool h2,float* p2){
 void Renderer::clearRuler(){m_rulerHasP1=m_rulerHasP2=false;}
 
 // ── Undo/Redo ────────────────────────────────────────────────────────────────
+// captureState: global + per-mesh transforms. Restoring a captured state
+// brings transforms back exactly — this is the base for ALL undo entries.
+UndoEntry Renderer::captureState() const{
+    UndoEntry e;
+    e.global = getTransform();
+    e.meshes.resize(m_meshes.size());
+    for(size_t i=0;i<m_meshes.size();++i){
+        const auto& mo = m_meshes[i];
+        e.meshes[i] = {mo.rotX,mo.rotY,mo.rotZ,
+                       mo.posX,mo.posY,mo.posZ,
+                       mo.scaX,mo.scaY,mo.scaZ};
+    }
+    return e;
+}
+
 void Renderer::pushUndoState(){
-    m_undoStack.push_back(getTransform());
+    m_undoStack.push_back(captureState());
     if((int)m_undoStack.size()>MAX_UNDO) m_undoStack.erase(m_undoStack.begin());
     m_redoStack.clear();
 }
+
+void Renderer::pushMeshUndo(int idx){
+    if(idx<0||idx>=(int)m_meshes.size()) return;
+    UndoEntry e = captureState();
+    e.vertMeshIdx = idx;
+    e.verts       = m_meshes[idx].vertices;  // before-state of deformation
+    m_undoStack.push_back(std::move(e));
+    if((int)m_undoStack.size()>MAX_UNDO) m_undoStack.erase(m_undoStack.begin());
+    m_redoStack.clear();
+}
+
+void Renderer::pushDeleteUndo(int idx){
+    if(idx<0||idx>=(int)m_meshes.size()) return;
+    UndoEntry e = captureState();
+    e.hasDeletedMesh = true;
+    e.meshAbsent     = false;   // this entry describes the PRE-delete state
+    e.deletedMeshIdx = idx;
+    e.deleted        = m_meshes[idx];  // full CPU copy (verts/indices/transform)
+    // Do NOT carry GL handles across the delete — the mesh is freed, so the
+    // copy must be re-uploaded fresh when restored.
+    e.deleted.vao=e.deleted.vbo=e.deleted.ibo=0;
+    e.deleted.gpuReady=false;
+    m_undoStack.push_back(std::move(e));
+    if((int)m_undoStack.size()>MAX_UNDO) m_undoStack.erase(m_undoStack.begin());
+    m_redoStack.clear();
+}
+
+void Renderer::restoreState(const UndoEntry& e){
+    // 1. Global transform
+    m_rotX=e.global.rotX;m_rotY=e.global.rotY;m_rotZ=e.global.rotZ;
+    m_posX=e.global.posX;m_posY=e.global.posY;m_posZ=e.global.posZ;
+    m_scaX=e.global.scaX;m_scaY=e.global.scaY;m_scaZ=e.global.scaZ;
+
+    // 2. Per-mesh transforms (best-effort across changed mesh counts)
+    for(size_t i=0;i<e.meshes.size() && i<m_meshes.size();++i){
+        m_meshes[i].rotX=e.meshes[i].rotX;m_meshes[i].rotY=e.meshes[i].rotY;m_meshes[i].rotZ=e.meshes[i].rotZ;
+        m_meshes[i].posX=e.meshes[i].posX;m_meshes[i].posY=e.meshes[i].posY;m_meshes[i].posZ=e.meshes[i].posZ;
+        m_meshes[i].scaX=e.meshes[i].scaX;m_meshes[i].scaY=e.meshes[i].scaY;m_meshes[i].scaZ=e.meshes[i].scaZ;
+    }
+
+    // 3. Vertex snapshot (brush / ring / weld / decimate / cleanup)
+    if(e.vertMeshIdx>=0 && e.vertMeshIdx<(int)m_meshes.size()){
+        m_meshes[e.vertMeshIdx].vertices = e.verts;
+        updateMeshVBO(m_meshes[e.vertMeshIdx]);
+        recomputeBounds(m_meshes[e.vertMeshIdx]);
+    }
+
+    // 4. Delete payload
+    if(e.hasDeletedMesh){
+        int idx = e.deletedMeshIdx;
+        if(e.meshAbsent){
+            // Entry describes the POST-delete state → ensure mesh is gone
+            if(idx>=0 && idx<(int)m_meshes.size()){
+                auto& mo = m_meshes[idx];
+                if(mo.vao) glDeleteVertexArrays(1,&mo.vao);
+                if(mo.vbo) glDeleteBuffers(1,&mo.vbo);
+                if(mo.ibo) glDeleteBuffers(1,&mo.ibo);
+                m_meshes.erase(m_meshes.begin()+idx);
+            }
+        } else {
+            // Entry describes the PRE-delete state → ensure mesh exists
+            if(idx<0 || idx>=(int)m_meshes.size()){
+                MeshObject mo = e.deleted;
+                uploadMeshObject(mo);
+                m_meshes.insert(m_meshes.begin()+idx, std::move(mo));
+            }
+        }
+    }
+
+    if(m_meshes.empty()) m_hasModel=false; else m_hasModel=true;
+    if(m_selectedMesh<0 || m_selectedMesh>=(int)m_meshes.size()) m_selectedMesh=-1;
+    m_isSeparated = (m_meshes.size()>1);
+}
+
 void Renderer::undo(){
     if(m_undoStack.empty()) return;
-    m_redoStack.push_back(getTransform());
-    auto s=m_undoStack.back(); m_undoStack.pop_back();
-    m_rotX=s.rotX;m_rotY=s.rotY;m_rotZ=s.rotZ;
-    m_posX=s.posX;m_posY=s.posY;m_posZ=s.posZ;
-    m_scaX=s.scaX;m_scaY=s.scaY;m_scaZ=s.scaZ;
+    UndoEntry e = std::move(m_undoStack.back()); m_undoStack.pop_back();
+    // The current (post-op) state becomes the redo entry.
+    UndoEntry r = captureState();
+    if(e.hasDeletedMesh){
+        // current state has the mesh missing → redo must re-delete it
+        r.hasDeletedMesh = true;
+        r.meshAbsent     = true;
+        r.deletedMeshIdx = e.deletedMeshIdx;
+        r.deleted        = e.deleted;
+    }
+    m_redoStack.push_back(std::move(r));
+    if((int)m_redoStack.size()>MAX_UNDO) m_redoStack.erase(m_redoStack.begin());
+    restoreState(e);
 }
+
 void Renderer::redo(){
     if(m_redoStack.empty()) return;
-    m_undoStack.push_back(getTransform());
-    auto s=m_redoStack.back(); m_redoStack.pop_back();
-    m_rotX=s.rotX;m_rotY=s.rotY;m_rotZ=s.rotZ;
-    m_posX=s.posX;m_posY=s.posY;m_posZ=s.posZ;
-    m_scaX=s.scaX;m_scaY=s.scaY;m_scaZ=s.scaZ;
+    UndoEntry e = std::move(m_redoStack.back()); m_redoStack.pop_back();
+    // Current state becomes the undo entry (mirror of undo()).
+    UndoEntry u = captureState();
+    if(e.hasDeletedMesh && e.meshAbsent){
+        u.hasDeletedMesh = true;
+        u.meshAbsent     = false;
+        u.deletedMeshIdx = e.deletedMeshIdx;
+        u.deleted        = e.deleted;
+    }
+    m_undoStack.push_back(std::move(u));
+    if((int)m_undoStack.size()>MAX_UNDO) m_undoStack.erase(m_undoStack.begin());
+    restoreState(e);
 }
+
 TransformState Renderer::getTransform() const{
     return{m_rotX,m_rotY,m_rotZ,m_posX,m_posY,m_posZ,m_scaX,m_scaY,m_scaZ};
 }

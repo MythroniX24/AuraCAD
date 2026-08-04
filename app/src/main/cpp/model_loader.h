@@ -49,6 +49,8 @@ private:
     static bool loadOBJ(const std::string& path, ModelData& data);
     static bool loadSTL(const std::string& path, ModelData& data);
     static bool loadGLB(const std::string& path, ModelData& data);
+    static bool loadPLY(const std::string& path, ModelData& data);   // ASCII + binary_little_endian
+    static bool load3DS(const std::string& path, ModelData& data);   // chunk-based legacy 3DS
     static void generateFlatNormals(ModelData& data);
     static void normalizeModel(ModelData& data);
 };
