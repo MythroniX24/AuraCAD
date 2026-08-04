@@ -75,7 +75,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private var cardBW: View? = null
     private var cardID: View? = null
     private var cardH:  View? = null
-    private var presetRow: View? = null
+    private var presetRow: LinearLayout? = null
 
     @Volatile private var suppressBW = false
     @Volatile private var suppressID = false

@@ -209,7 +209,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
 
         // ── Status label ──────────────────────────────────────────────────────
         tvStatus = TextView(ctx).apply {
-            text = "Tap "Use Selected" to choose a mesh, then tap the model to paint."
+            text = "Tap \"Use Selected\" to choose a mesh, then tap the model to paint."
             textSize = 10f
             setTextColor(Color.parseColor("#9090B0"))
             background = ctx.getDrawable(R.drawable.bg_hint_card)
@@ -234,7 +234,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
         val idx = meshIdx
         if (idx < 0) {
             activity?.runOnUiThread {
-                tvStatus?.text = "⚠ Tap "Use Selected" first to choose a target mesh."
+                tvStatus?.text = "⚠ Tap \"Use Selected\" first to choose a target mesh."
                 tvStatus?.setTextColor(Color.parseColor("#FF7043"))
             }
             return
