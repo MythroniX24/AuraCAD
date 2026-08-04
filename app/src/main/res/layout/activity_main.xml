@@ -71,11 +71,17 @@
             android:src="@drawable/ic_reset"
             android:contentDescription="Reset Camera"/>
 
+        <!-- AI Assistant → Gemini Ring Fit + AI settings -->
+        <ImageButton android:id="@+id/btnAi"
+            style="@style/TopBarBtn"
+            android:src="@drawable/ic_ai"
+            android:contentDescription="AI Assistant"/>
+
         <View android:layout_width="1dp" android:layout_height="24dp"
             android:background="#22FFFFFF"
             android:layout_marginStart="6dp" android:layout_marginEnd="6dp"/>
 
-        <!-- Overflow ⋯ — opens menu with Open / Edit / Mesh List / Ruler / Screenshot / Export -->
+        <!-- Overflow ⋯ — opens menu with Open / Edit / Mesh List / Ruler / Screenshot / Export / AI -->
         <ImageButton android:id="@+id/btnOverflow"
             style="@style/TopBarBtn"
             android:src="@drawable/ic_more"

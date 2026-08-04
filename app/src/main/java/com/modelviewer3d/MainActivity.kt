@@ -40,6 +40,7 @@ class MainActivity : AppCompatActivity() {
     lateinit var glView: ModelGLSurfaceView
     private lateinit var renderer: ModelRenderer
 
+    private var btnAi: View? = null
     private var tvFps: TextView? = null
     private var tvHint: View? = null
     private var loadingOverlay: View? = null
@@ -159,6 +160,10 @@ class MainActivity : AppCompatActivity() {
             findViewById<View>(R.id.btnRedo).setOnClickListener  { glView.queueEvent { NativeLib.nativeRedo() } }
             findViewById<View>(R.id.btnReset).setOnClickListener { glView.queueEvent { NativeLib.nativeResetCamera() } }
 
+            // ── AI Assistant button ──────────────────────────────────────────
+            btnAi = findViewById(R.id.btnAi)
+            btnAi?.setOnClickListener { openAiSettings() }
+
             // ── Top-bar overflow menu ────────────────────────────────────────
             findViewById<View>(R.id.btnOverflow).setOnClickListener { showOverflowMenu(it) }
 
@@ -245,6 +250,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 4, 3, if (rulerActive) "Disable Ruler" else "Ruler")
         popup.menu.add(0, 5, 4, "Screenshot")
         popup.menu.add(0, 6, 5, "Export…")
+        popup.menu.add(0, 7, 6, "✨ AI Assistant")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> findViewById<View>(R.id.btnOpen).performClick()
@@ -253,6 +259,7 @@ class MainActivity : AppCompatActivity() {
                 4 -> btnRuler?.performClick()
                 5 -> findViewById<View>(R.id.btnScreenshot).performClick()
                 6 -> findViewById<View>(R.id.btnExport).performClick()
+                7 -> openAiSettings()
             }
             true
         }
@@ -727,6 +734,14 @@ class MainActivity : AppCompatActivity() {
         if (supportFragmentManager.findFragmentByTag(MeshListFragment.TAG) != null) return
         MeshListFragment.newInstance().show(supportFragmentManager, MeshListFragment.TAG)
     }
+    private fun openAiSettings() {
+        if (supportFragmentManager.findFragmentByTag(AiSettingsFragment.TAG) != null) return
+        AiSettingsFragment.newInstance().show(supportFragmentManager, AiSettingsFragment.TAG)
+    }
+
+    /** Current model file name (for AI context), or "ring model" if none. */
+    fun currentModelName(): String =
+        if (currentFileName.isNotEmpty()) currentFileName else "ring model"
 
     /**
      * Long-press selection result handler.  Already runs on the UI thread

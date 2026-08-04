@@ -90,7 +90,19 @@ class ModelGLSurfaceView @JvmOverloads constructor(
 
     fun attachRenderer(renderer: ModelRenderer) {
         setRenderer(renderer)
-        renderMode = RENDERMODE_CONTINUOUSLY
+        // Render-on-demand: no 24/7 GPU burn. Every native state change flows
+        // through queueEvent(), which we override to requestRender() — so the
+        // scene stays in sync while idle frames (and the FPS drops they cause
+        // while bottom sheets/popups are animating) disappear entirely.
+        renderMode = RENDERMODE_WHEN_DIRTY
+    }
+
+    /** All native mutations go through queueEvent — trigger exactly one redraw
+     *  so WHEN_DIRTY never misses an update. Also makes slider drags and tool
+     *  button clicks cost one frame instead of hammering the GPU. */
+    override fun queueEvent(r: Runnable) {
+        super.queueEvent(r)
+        requestRender()
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

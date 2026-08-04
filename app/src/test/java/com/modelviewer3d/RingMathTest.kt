@@ -1,6 +1,7 @@
 package com.modelviewer3d
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -84,5 +85,38 @@ class RingMathTest {
     fun `usSizeLabel formats whole and half sizes`() {
         assertEquals("US 7", RingMath.usSizeLabel(RingMath.usSizeToDiam(7f)))
         assertTrue(RingMath.usSizeLabel(0f) == "—")
+    }
+
+    @Test
+    fun `circumference of a 16_5 mm ring is about 51_8 mm`() {
+        assertEquals(51.8f, RingMath.circumferenceMM(16.5f), 0.2f)
+    }
+
+    @Test
+    fun `parseUserSize understands US prefixed sizes`() {
+        assertEquals(RingMath.usSizeToDiam(6f), RingMath.parseUserSize("US 6")!!, eps)
+        assertEquals(RingMath.usSizeToDiam(6.5f), RingMath.parseUserSize("us 6.5")!!, eps)
+        assertEquals(RingMath.usSizeToDiam(7f), RingMath.parseUserSize("size 7")!!, eps)
+        assertEquals(RingMath.usSizeToDiam(8f), RingMath.parseUserSize("s8")!!, eps)
+    }
+
+    @Test
+    fun `parseUserSize understands mm diameters`() {
+        assertEquals(17.5f, RingMath.parseUserSize("17.5mm")!!, eps)
+        assertEquals(17.5f, RingMath.parseUserSize("17.5 mm")!!, eps)
+        assertEquals(20f, RingMath.parseUserSize("20")!!, eps)
+    }
+
+    @Test
+    fun `parseUserSize treats bare numbers in US range as US sizes`() {
+        assertEquals(RingMath.usSizeToDiam(6f), RingMath.parseUserSize("6")!!, eps)
+        assertEquals(RingMath.usSizeToDiam(7.5f), RingMath.parseUserSize("7.5")!!, eps)
+    }
+
+    @Test
+    fun `parseUserSize rejects garbage`() {
+        assertNull(RingMath.parseUserSize(""))
+        assertNull(RingMath.parseUserSize("bigger"))
+        assertNull(RingMath.parseUserSize("abcdef"))
     }
 }

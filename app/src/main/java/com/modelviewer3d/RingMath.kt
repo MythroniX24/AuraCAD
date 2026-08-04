@@ -60,4 +60,35 @@ object RingMath {
         val whole = r.toInt()
         return if (r - whole > 0.01f) "US %.1f".format(r) else "US $whole"
     }
+
+    /** Inner circumference (mm) for a given inner diameter (mm). */
+    fun circumferenceMM(diamMM: Float): Float = diamMM * PI.toFloat()
+
+    /**
+     * Parse a user-typed ring size into an inner diameter (mm). Understands:
+     *  - "US 6", "us 6.5", "size 7", "s8"           → US size conversion
+     *  - "17.5mm", "17.5 mm"                        → explicit mm diameter
+     *  - "6", "6.5" (3..16)                         → treated as US size
+     *  - "17.5", "20" (>16)                         → treated as mm diameter
+     * Returns null when the text is not a ring size.
+     */
+    fun parseUserSize(text: String): Float? {
+        val t = text.trim().lowercase()
+        if (t.isEmpty()) return null
+        val num = Regex("\\d+\\.?\\d*").find(t)?.value?.toFloatOrNull() ?: return null
+        return when {
+            "us" in t || "size" in t || (t.startsWith("s") && t.length > 1) -> usSizeToDiam(num)
+            "mm" in t -> num.coerceAtLeast(1f)
+            num in 3f..16f -> usSizeToDiam(num)   // bare number in US range
+            else -> num.coerceAtLeast(1f)         // bare number → mm
+        }
+    }
+
+    /** US size label from a raw size number (e.g. 7.5 → "US 7.5"). */
+    fun usSizeName(size: Float): String {
+        if (size <= 0f) return "—"
+        val r = round(size * 10f) / 10f
+        val whole = r.toInt()
+        return if (r - whole > 0.01f) "US %.1f".format(r) else "US $whole"
+    }
 }
