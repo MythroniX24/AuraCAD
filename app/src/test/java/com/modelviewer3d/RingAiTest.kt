@@ -36,7 +36,8 @@ class RingAiTest {
     }
 
     @Test
-    fun `validate clamps out-of-range values into tool ranges`() {
+    fun `validate falls back to originals for wildly out-of-range values`() {
+        // 999 / 0.0001 / -5 are physically impossible → reject and keep originals
         val s = RingAi.Suggestion(
             innerDiaMM = 999f, bandWidthMM = 0.0001f, heightMM = -5f,
             usSize = null, note = ""
@@ -45,9 +46,24 @@ class RingAiTest {
             origInnerDiaMM = 16.5f, origBandMM = 2f, origHeightMM = 3f,
             idMin = 8f, idMax = 33f, bwMin = 0.2f, bwMax = 7f,
             hMin = 0.9f, hMax = 9f)
+        assertEquals(16.5f, v.innerDiaMM!!, 1e-3f)
+        assertEquals(2f, v.bandWidthMM!!, 1e-3f)
+        assertEquals(3f, v.heightMM!!, 1e-3f)
+    }
+
+    @Test
+    fun `validate clamps borderline values into tool ranges`() {
+        val s = RingAi.Suggestion(
+            innerDiaMM = 40f, bandWidthMM = 8f, heightMM = 12f,
+            usSize = null, note = ""
+        )
+        val v = RingAi.validate(s,
+            origInnerDiaMM = 16.5f, origBandMM = 2f, origHeightMM = 3f,
+            idMin = 8f, idMax = 33f, bwMin = 0.2f, bwMax = 7f,
+            hMin = 0.9f, hMax = 9f)
         assertEquals(33f, v.innerDiaMM!!, 1e-3f)   // clamped to idMax
-        assertEquals(0.2f, v.bandWidthMM!!, 1e-3f) // clamped to bwMin
-        assertEquals(0.9f, v.heightMM!!, 1e-3f)    // clamped to hMin
+        assertEquals(7f, v.bandWidthMM!!, 1e-3f)   // clamped to bwMax
+        assertEquals(9f, v.heightMM!!, 1e-3f)      // clamped to hMax
     }
 
     @Test
