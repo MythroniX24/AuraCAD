@@ -211,7 +211,8 @@ object UISheetKit {
 
     /** +/- step button. */
     fun stepButton(ctx: Context, label: String, accent: String = CYAN,
-                   widthDp: Int = 44, heightDp: Int = 40): Button =
+                   widthDp: Int = 44, heightDp: Int = 40,
+                   onClick: () -> Unit = {}): Button =
         Button(ctx).apply {
             this.text = label
             textSize = 16f
@@ -221,6 +222,7 @@ object UISheetKit {
             layoutParams = LinearLayout.LayoutParams(
                 dp(ctx, widthDp), dp(ctx, heightDp)
             ).apply { setMargins(0, 0, dp(ctx, 8), 0) }
+            setOnClickListener { onClick() }
         }
 
     /** Text input field. */
