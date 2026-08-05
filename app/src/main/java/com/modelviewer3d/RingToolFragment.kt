@@ -66,6 +66,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private var cardBW: View? = null
     private var cardID: View? = null
     private var cardH:  View? = null
+    // Field type is View on purpose — assigning LinearLayout children
+    // (measureCard result) must stay View-typed to avoid smart-cast errors.
     private var presetScroll: LinearLayout? = null
 
     private var lastBW = -1f
@@ -204,21 +206,21 @@ class RingToolFragment : BottomSheetDialogFragment() {
             "#4DD8FF", 0.25f,
             onSbInit = { sbBW = it }, onEtInit = { etBW = it }, onInfoInit = { tvBW = it },
             onChange = { onBandChanged(it) })
-        cardBW = bwCard; bwCard.visibility = View.GONE; root.addView(bwCard)
+        bwCard.visibility = View.GONE; root.addView(bwCard); cardBW = bwCard
 
         val idCard = measureCard(
             ctx, "INNER DIAMETER", "Ring size — hole resizes, wall stays",
             "#FFC46B", 0.5f,
             onSbInit = { sbID = it }, onEtInit = { etID = it }, onInfoInit = { tvID = it },
             onChange = { onInnerChanged(it) })
-        cardID = idCard; idCard.visibility = View.GONE; root.addView(idCard)
+        idCard.visibility = View.GONE; root.addView(idCard); cardID = idCard
 
         val hCard = measureCard(
             ctx, "HEIGHT", "Stretch / squash along the ring axis",
             "#A78BFA", 0.5f,
             onSbInit = { sbH = it }, onEtInit = { etH = it }, onInfoInit = { tvH = it },
             onChange = { onHeightChanged(it) })
-        cardH = hCard; cardH.visibility = View.GONE; root.addView(hCard)
+        hCard.visibility = View.GONE; root.addView(hCard); cardH = hCard
 
         // ── 6. US size presets ─────────────────────────────────────────────────
         root.addView(UISheetKit.sectionLabel(ctx, "QUICK US SIZES"))
@@ -315,11 +317,11 @@ class RingToolFragment : BottomSheetDialogFragment() {
             })
             addView(UISheetKit.stepButton(ctx, "−", accentHex) {
                 val cur = currentValue(accentHex)
-                applyValue(cur - step, accentHex, fromUser = true)
+                applyValue(cur - step, accentHex, fromUser = true, onChange = onChange)
             })
             addView(UISheetKit.stepButton(ctx, "+", accentHex) {
                 val cur = currentValue(accentHex)
-                applyValue(cur + step, accentHex, fromUser = true)
+                applyValue(cur + step, accentHex, fromUser = true, onChange = onChange)
             })
         }
         card.addView(valueRow)
@@ -374,7 +376,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
         else      -> hMin to hMax
     }
 
-    private fun applyValue(v: Float, accentHex: String, fromUser: Boolean) {
+    private fun applyValue(v: Float, accentHex: String, fromUser: Boolean,
+                           onChange: (Float) -> Unit = {}) {
         val (min, max) = rangeFor(accentHex)
         val clamped = v.coerceIn(min, max)
         val txt = "%.2f".format(clamped)
