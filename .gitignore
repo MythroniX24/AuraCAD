@@ -12,3 +12,7 @@ captures/
 *.aab
 *.keystore
 !debug.keystore
+
+# Local-only: UI backup + screenshots
+AuraCAD_UI_BACKUP/
+Screenshots/

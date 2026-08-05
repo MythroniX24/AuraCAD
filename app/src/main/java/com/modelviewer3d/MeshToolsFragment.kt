@@ -211,7 +211,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
                                        else "✗ Decimation failed (too few faces?)"
                     if (ok) loadStats(idx)
                     activity?.sendBroadcast(
-                        Intent(EditorPanelFragment.ACTION_DIMS_CHANGED))
+                        Intent("com.modelviewer3d.DIMS_CHANGED"))
                 }
             }
         })
