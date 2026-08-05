@@ -51,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     lateinit var glView: ModelGLSurfaceView
     private lateinit var renderer: ModelRenderer
 
+    private var btnAi: View? = null
     private var tvFps: TextView? = null
     private var tvHint: View? = null
     private var loadingOverlay: View? = null
@@ -168,10 +169,10 @@ class MainActivity : AppCompatActivity() {
             //    via View.performClick(). The wiring stays identical so all
             //    existing features keep working unchanged.) ──────────────────
             findViewById<View>(R.id.btnOpen).setOnClickListener       { requestOpenFile() }
-            findViewById<View>(R.id.btnEdit).setOnClickListener       { toast("Editor naye design ke saath aayega — jald hi") }
+            findViewById<View>(R.id.btnEdit).setOnClickListener       { openEditor() }
             findViewById<View>(R.id.btnMeshList).setOnClickListener   { openMeshList() }
             btnRuler?.setOnClickListener                              { toggleRulerMode() }
-            findViewById<View>(R.id.btnRingTool).setOnClickListener   { toast("Ring Tool naye design ke saath aayega — jald hi") }
+            findViewById<View>(R.id.btnRingTool).setOnClickListener   { openRingTool() }
             findViewById<View>(R.id.btnMeshTools).setOnClickListener  { openMeshTools() }
             findViewById<View>(R.id.btnExport).setOnClickListener     { showExportSheet() }
             findViewById<View>(R.id.btnScreenshot).setOnClickListener { takeScreenshot() }
@@ -195,6 +196,10 @@ class MainActivity : AppCompatActivity() {
                     delay(600)
                 }
             }
+
+            // ── AI Assistant button ──────────────────────────────────────────
+            btnAi = findViewById(R.id.btnAi)
+            btnAi?.setOnClickListener { openAiSettings() }
 
             // ── Top-bar overflow menu ────────────────────────────────────────
             findViewById<View>(R.id.btnOverflow).setOnClickListener { showOverflowMenu(it) }
@@ -293,19 +298,23 @@ class MainActivity : AppCompatActivity() {
     private fun showOverflowMenu(anchor: View) {
         val popup = PopupMenu(this, anchor)
         popup.menu.add(0, 1, 0, "Open Model…")
-        popup.menu.add(0, 2, 1, "Mesh List")
-        popup.menu.add(0, 3, 2, if (rulerActive) "Disable Ruler" else "Ruler")
-        popup.menu.add(0, 4, 3, "Screenshot")
-        popup.menu.add(0, 5, 4, "Export…")
-        popup.menu.add(0, 6, 5, "🔋 Battery Optimization")
+        popup.menu.add(0, 2, 1, "Edit / Materials")
+        popup.menu.add(0, 3, 2, "Mesh List")
+        popup.menu.add(0, 4, 3, if (rulerActive) "Disable Ruler" else "Ruler")
+        popup.menu.add(0, 5, 4, "Screenshot")
+        popup.menu.add(0, 6, 5, "Export…")
+        popup.menu.add(0, 7, 6, "✨ AI Assistant")
+        popup.menu.add(0, 8, 7, "🔋 Battery Optimization")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> findViewById<View>(R.id.btnOpen).performClick()
-                2 -> findViewById<View>(R.id.btnMeshList).performClick()
-                3 -> btnRuler?.performClick()
-                4 -> findViewById<View>(R.id.btnScreenshot).performClick()
-                5 -> findViewById<View>(R.id.btnExport).performClick()
-                6 -> requestBatteryOptimizationExemption()
+                2 -> findViewById<View>(R.id.btnEdit).performClick()
+                3 -> findViewById<View>(R.id.btnMeshList).performClick()
+                4 -> btnRuler?.performClick()
+                5 -> findViewById<View>(R.id.btnScreenshot).performClick()
+                6 -> findViewById<View>(R.id.btnExport).performClick()
+                7 -> openAiSettings()
+                8 -> requestBatteryOptimizationExemption()
             }
             true
         }
@@ -872,13 +881,25 @@ class MainActivity : AppCompatActivity() {
     }
 
     // ── Panels ────────────────────────────────────────────────────────────────
+    private fun openRingTool() {
+        if (supportFragmentManager.findFragmentByTag(RingToolFragment.TAG) != null) return
+        RingToolFragment.newInstance().show(supportFragmentManager, RingToolFragment.TAG)
+    }
     private fun openMeshTools() {
         if (supportFragmentManager.findFragmentByTag(MeshToolsFragment.TAG) != null) return
         MeshToolsFragment.newInstance().show(supportFragmentManager, MeshToolsFragment.TAG)
     }
+    private fun openEditor() {
+        if (supportFragmentManager.findFragmentByTag(EditorPanelFragment.TAG) != null) return
+        EditorPanelFragment.newInstance().show(supportFragmentManager, EditorPanelFragment.TAG)
+    }
     private fun openMeshList() {
         if (supportFragmentManager.findFragmentByTag(MeshListFragment.TAG) != null) return
         MeshListFragment.newInstance().show(supportFragmentManager, MeshListFragment.TAG)
+    }
+    private fun openAiSettings() {
+        if (supportFragmentManager.findFragmentByTag(AiSettingsFragment.TAG) != null) return
+        AiSettingsFragment.newInstance().show(supportFragmentManager, AiSettingsFragment.TAG)
     }
 
     /**
