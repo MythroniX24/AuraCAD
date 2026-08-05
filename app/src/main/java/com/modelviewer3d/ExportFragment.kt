@@ -32,7 +32,7 @@ class ExportFragment : BottomSheetDialogFragment() {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
             setPadding(0, 14, 0, 0)
             addView(View(ctx).apply {
-                setBackgroundColor(Color.parseColor("#404058"))
+                setBackgroundColor(Color.parseColor("#607286"))
                 layoutParams = LinearLayout.LayoutParams(48, 4)
             })
         })
@@ -48,7 +48,7 @@ class ExportFragment : BottomSheetDialogFragment() {
         root.addView(TextView(ctx).apply {
             text = "Choose format and destination"
             textSize = 11f
-            setTextColor(Color.parseColor("#606080"))
+            setTextColor(Color.parseColor("#74869A"))
             setPadding(20, 0, 20, 12)
         })
 
@@ -64,10 +64,10 @@ class ExportFragment : BottomSheetDialogFragment() {
         }
         val tvFmtValue = TextView(ctx).apply {
             text = "Wavefront OBJ · universal"; textSize = 11f
-            setTextColor(Color.parseColor("#00D4FF"))
+            setTextColor(Color.parseColor("#62E6FF"))
         }
         val tvFmtChevron = TextView(ctx).apply {
-            text = "▾"; textSize = 16f; setTextColor(Color.parseColor("#606080"))
+            text = "▾"; textSize = 16f; setTextColor(Color.parseColor("#74869A"))
             setPadding(8, 0, 0, 0)
         }
         val fmtHeader = LinearLayout(ctx).apply {
@@ -99,15 +99,15 @@ class ExportFragment : BottomSheetDialogFragment() {
         fmtHeader.addView(tvFmtChevron)
         root.addView(fmtHeader)
 
-        val btnObj = makeFormatBtn(ctx, "OBJ", "Wavefront OBJ\nText · Universal", "#00D4FF", true)
-        val btnStl = makeFormatBtn(ctx, "STL", "Stereolithography\nBinary · 3D Printing", "#9090B0", false)
-        val btnPly = makeFormatBtn(ctx, "PLY", "Stanford PLY\nASCII · Meshes + Clouds", "#9090B0", false)
+        val btnObj = makeFormatBtn(ctx, "OBJ", "Wavefront OBJ\nText · Universal", "#62E6FF", true)
+        val btnStl = makeFormatBtn(ctx, "STL", "Stereolithography\nBinary · 3D Printing", "#A8B6C7", false)
+        val btnPly = makeFormatBtn(ctx, "PLY", "Stanford PLY\nASCII · Meshes + Clouds", "#A8B6C7", false)
 
         fun applyFmt(fmt: String) {
             selectedFormat = fmt
-            tintFormatBtn(btnObj, if (fmt == "obj") "#00D4FF" else "#9090B0", fmt == "obj")
-            tintFormatBtn(btnStl, if (fmt == "stl") "#00D4FF" else "#9090B0", fmt == "stl")
-            tintFormatBtn(btnPly, if (fmt == "ply") "#00D4FF" else "#9090B0", fmt == "ply")
+            tintFormatBtn(btnObj, if (fmt == "obj") "#62E6FF" else "#A8B6C7", fmt == "obj")
+            tintFormatBtn(btnStl, if (fmt == "stl") "#62E6FF" else "#A8B6C7", fmt == "stl")
+            tintFormatBtn(btnPly, if (fmt == "ply") "#62E6FF" else "#A8B6C7", fmt == "ply")
             tvFmtValue.text = when (fmt) {
                 "obj" -> "Wavefront OBJ · universal"
                 "stl" -> "STL binary · 3D printing"
@@ -129,7 +129,7 @@ class ExportFragment : BottomSheetDialogFragment() {
 
         // ── Save to Device ───────────────────────────────────────────────────
         root.addView(sectionLabel(ctx, "SAVE TO DEVICE"))
-        root.addView(makeBigActionBtn(ctx, "💾", "Save to Downloads", "Saves in Downloads/AuraCAD", "#1A3D50", "#00D4FF") {
+        root.addView(makeBigActionBtn(ctx, "💾", "Save to Downloads", "Saves in Downloads/AuraCAD", "#1A3D50", "#62E6FF") {
             (activity as? MainActivity)?.exportModel(selectedFormat, share = false)
             dismiss()
         })
@@ -141,7 +141,7 @@ class ExportFragment : BottomSheetDialogFragment() {
         root.addView(sectionLabel(ctx, "SHARE VIA"))
 
         // System share (all apps)
-        root.addView(makeBigActionBtn(ctx, "↗", "Share via Any App", "Opens system share sheet", "#1A3D50", "#00D4FF") {
+        root.addView(makeBigActionBtn(ctx, "↗", "Share via Any App", "Opens system share sheet", "#1A3D50", "#62E6FF") {
             (activity as? MainActivity)?.exportModel(selectedFormat, share = true)
             dismiss()
         })
@@ -199,7 +199,7 @@ class ExportFragment : BottomSheetDialogFragment() {
         card.addView(TextView(ctx).apply {
             text = subtitle
             textSize = 10f
-            setTextColor(Color.parseColor("#606080"))
+            setTextColor(Color.parseColor("#74869A"))
             setPadding(0, 4, 0, 0)
         })
         return card
@@ -244,7 +244,7 @@ class ExportFragment : BottomSheetDialogFragment() {
             setTextColor(Color.parseColor(accentHex))
         })
         texts.addView(TextView(ctx).apply {
-            text = sub; textSize = 10f; setTextColor(Color.parseColor("#606080")); setPadding(0, 2, 0, 0)
+            text = sub; textSize = 10f; setTextColor(Color.parseColor("#74869A")); setPadding(0, 2, 0, 0)
         })
         row.addView(texts)
         row.addView(TextView(ctx).apply {
@@ -282,12 +282,12 @@ class ExportFragment : BottomSheetDialogFragment() {
 
     private fun sectionLabel(ctx: android.content.Context, text: String) = TextView(ctx).apply {
         this.text = text; textSize = 9f; letterSpacing = 0.14f
-        setTextColor(Color.parseColor("#505070"))
+        setTextColor(Color.parseColor("#607286"))
         setPadding(20, 14, 20, 6)
     }
 
     private fun divider(ctx: android.content.Context) = View(ctx).apply {
-        setBackgroundColor(Color.parseColor("#1A1A28"))
+        setBackgroundColor(Color.parseColor("#243445"))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
     }
 

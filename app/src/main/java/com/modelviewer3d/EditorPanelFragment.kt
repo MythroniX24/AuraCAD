@@ -99,7 +99,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
             setPadding(0, 14, 0, 0)
             addView(View(ctx).apply {
-                setBackgroundColor(Color.parseColor("#404058"))
+                setBackgroundColor(Color.parseColor("#607286"))
                 layoutParams = LinearLayout.LayoutParams(48, 4)
             })
         })
@@ -118,7 +118,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             addView(TextView(ctx).apply {
                 text = "v2"
                 textSize = 9f; letterSpacing = 0.12f
-                setTextColor(Color.parseColor("#00D4FF"))
+                setTextColor(Color.parseColor("#62E6FF"))
                 background = ctx.getDrawable(R.drawable.bg_pill); setPadding(10, 3, 10, 3)
             })
         })
@@ -126,7 +126,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
 
         // ── TRANSFORM card ────────────────────────────────────────────────────
         root.addView(card(ctx) { card ->
-            card.addView(cardTitle(ctx, "TRANSFORM", "#00D4FF"))
+            card.addView(cardTitle(ctx, "TRANSFORM", "#62E6FF"))
 
             fun sliderRow(
                 label: String, unit: String, min: Float, max: Float,
@@ -147,12 +147,12 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
                     setPadding(16, 10, 16, 0)
                     addView(TextView(ctx).apply {
                         text = label; textSize = 12f
-                        setTextColor(Color.parseColor("#9090B0"))
+                        setTextColor(Color.parseColor("#A8B6C7"))
                         layoutParams = LinearLayout.LayoutParams(20, LinearLayout.LayoutParams.WRAP_CONTENT)
                     })
                     addView(TextView(ctx).apply {
                         text = unit; textSize = 10f
-                        setTextColor(Color.parseColor("#505070"))
+                        setTextColor(Color.parseColor("#607286"))
                         layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply { setPadding(6,0,0,0) }
                     })
                     addView(valueTv)
@@ -201,7 +201,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
 
         // ── GEOMETRY row (flip + reset all) ───────────────────────────────────
         root.addView(card(ctx) { card ->
-            card.addView(cardTitle(ctx, "GEOMETRY", "#00D4FF"))
+            card.addView(cardTitle(ctx, "GEOMETRY", "#62E6FF"))
             val row = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL; setPadding(16, 8, 16, 8)
             }
@@ -212,7 +212,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             ).forEach { (lbl, action) ->
                 row.addView(Button(ctx).apply {
                     text = lbl; textSize = 11f
-                    setTextColor(Color.parseColor("#9090B0"))
+                    setTextColor(Color.parseColor("#A8B6C7"))
                     background = ctx.getDrawable(R.drawable.bg_card_dark)
                     setOnClickListener { glRun { action() } }
                     layoutParams = LinearLayout.LayoutParams(0, 40, 1f).apply { setMargins(0, 0, 8, 0) }
@@ -221,7 +221,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             card.addView(row)
             card.addView(Button(ctx).apply {
                 text = "↺  Reset All Transforms"
-                textSize = 11f; setTextColor(Color.parseColor("#FF7043"))
+                textSize = 11f; setTextColor(Color.parseColor("#FF9B71"))
                 background = ctx.getDrawable(R.drawable.bg_btn_danger)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 42
@@ -247,11 +247,11 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
 
         // ── SIZE card ────────────────────────────────────────────────────────
         root.addView(card(ctx) { card ->
-            card.addView(cardTitle(ctx, "SIZE  (mm)", "#FF9800"))
+            card.addView(cardTitle(ctx, "SIZE  (mm)", "#FFB86B"))
 
             val tvOrig = TextView(ctx).apply {
                 text = "Original: loading…"
-                textSize = 10f; setTextColor(Color.parseColor("#505070")); setPadding(16, 0, 16, 0)
+                textSize = 10f; setTextColor(Color.parseColor("#607286")); setPadding(16, 0, 16, 0)
             }
             tvOrigDims = tvOrig
             card.addView(tvOrig)
@@ -259,7 +259,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             card.addView(Switch(ctx).apply {
                 text = "Uniform Scale (lock ratio)"; isChecked = false
                 setTextColor(Color.WHITE); textSize = 12f
-                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
                 trackTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#1A3D50"))
                 setPadding(16, 8, 16, 8)
                 setOnCheckedChangeListener { _, v -> uniformScale = v }
@@ -273,7 +273,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
                 }
                 row.addView(TextView(ctx).apply {
                     text = axLabel; textSize = 12f
-                    setTextColor(Color.parseColor("#9090B0"))
+                    setTextColor(Color.parseColor("#A8B6C7"))
                     layoutParams = LinearLayout.LayoutParams(26, LinearLayout.LayoutParams.WRAP_CONTENT)
                 })
                 val et = EditText(ctx).apply {
@@ -286,7 +286,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
                 }
                 row.addView(et)
                 row.addView(TextView(ctx).apply {
-                    text = " mm"; textSize = 11f; setTextColor(Color.parseColor("#505070"))
+                    text = " mm"; textSize = 11f; setTextColor(Color.parseColor("#607286"))
                 })
                 card.addView(row)
 
@@ -333,7 +333,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
 
             card.addView(Button(ctx).apply {
                 text = "Reset to Original"
-                textSize = 11f; setTextColor(Color.parseColor("#00D4FF"))
+                textSize = 11f; setTextColor(Color.parseColor("#62E6FF"))
                 background = ctx.getDrawable(R.drawable.bg_btn_accent)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, 40
@@ -350,7 +350,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
 
         // ── APPEARANCE card ───────────────────────────────────────────────────
         root.addView(card(ctx) { card ->
-            card.addView(cardTitle(ctx, "APPEARANCE", "#9C7AFF"))
+            card.addView(cardTitle(ctx, "APPEARANCE", "#A78BFA"))
 
             // Colour presets
             val swatchRow = LinearLayout(ctx).apply {
@@ -435,7 +435,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             card.addView(Switch(ctx).apply {
                 text = "Wireframe Mode"; isChecked = false
                 setTextColor(Color.WHITE); textSize = 12f
-                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
                 trackTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#1A3D50"))
                 setPadding(16, 6, 16, 4)
                 setOnCheckedChangeListener { _, on -> glRun { NativeLib.nativeSetWireframe(on) } }
@@ -443,7 +443,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             card.addView(Switch(ctx).apply {
                 text = "Bounding Box"; isChecked = false
                 setTextColor(Color.WHITE); textSize = 12f
-                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
                 trackTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#1A3D50"))
                 setPadding(16, 6, 16, 14)
                 setOnCheckedChangeListener { _, on -> glRun { NativeLib.nativeSetBoundingBox(on) } }
@@ -483,7 +483,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
 
     private fun cardSubTitle(ctx: android.content.Context, t: String) = TextView(ctx).apply {
         text = t; textSize = 10f
-        setTextColor(Color.parseColor("#606080")); setPadding(16, 4, 16, 0)
+        setTextColor(Color.parseColor("#74869A")); setPadding(16, 4, 16, 0)
     }
 
     private fun space(ctx: android.content.Context, dp: Int) = View(ctx).apply {
@@ -491,7 +491,7 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
     }
 
     private fun divider(ctx: android.content.Context) = View(ctx).apply {
-        setBackgroundColor(Color.parseColor("#1A1A28"))
+        setBackgroundColor(Color.parseColor("#243445"))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
     }
 

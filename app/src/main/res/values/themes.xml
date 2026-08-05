@@ -36,7 +36,47 @@
         <item name="android:tint">@color/text_secondary</item>
     </style>
 
+    <style name="ToolDockItem">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">match_parent</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:orientation">vertical</item>
+        <item name="android:gravity">center</item>
+        <item name="android:layout_marginStart">3dp</item>
+        <item name="android:layout_marginEnd">3dp</item>
+        <item name="android:background">@drawable/bg_tool_button</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+
+    <style name="ToolDockIcon">
+        <item name="android:layout_width">25dp</item>
+        <item name="android:layout_height">25dp</item>
+        <item name="android:tint">@color/tool_idle_icon</item>
+    </style>
+
+    <style name="ToolDockLabel">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textColor">@color/tool_idle_label</item>
+        <item name="android:textSize">9sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:letterSpacing">0.08</item>
+        <item name="android:paddingTop">4dp</item>
+    </style>
+
     <!-- Legacy ToolbarBtn kept for backward compat (now hidden in new layout) -->
+    <style name="TopBarBtnAccent">
+        <item name="android:layout_width">44dp</item>
+        <item name="android:layout_height">44dp</item>
+        <item name="android:padding">10dp</item>
+        <item name="android:layout_marginStart">2dp</item>
+        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:scaleType">centerInside</item>
+        <item name="android:background">@drawable/bg_top_bar_btn</item>
+        <item name="android:tint">@color/accent_cyan</item>
+    </style>
+
     <style name="ToolbarBtn">
         <item name="android:layout_width">44dp</item>
         <item name="android:layout_height">44dp</item>

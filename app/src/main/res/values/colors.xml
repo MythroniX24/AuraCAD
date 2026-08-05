@@ -4,29 +4,29 @@
     <color name="bg_dark">#0F0F18</color>
     <color name="bg_medium">#161622</color>
     <color name="bg_surface">#1E1E2E</color>
-    <color name="bg_card">#252535</color>
-    <color name="bg_card_elevated">#2E2E42</color>
-    <color name="bg_input">#1A1A2A</color>
+    <color name="bg_card">#202B3A</color>
+    <color name="bg_card_elevated">#2B394A</color>
+    <color name="bg_input">#15202C</color>
 
-    <color name="accent_cyan">#00D4FF</color>
+    <color name="accent_cyan">#62E6FF</color>
     <color name="accent_cyan_dim">#1A4A5A</color>
     <color name="accent_cyan_soft">#2200D4FF</color>
-    <color name="accent_orange">#FF7043</color>
+    <color name="accent_orange">#FF9B71</color>
     <color name="accent_orange_dim">#4A2010</color>
     <color name="accent_green">#4CAF82</color>
     <color name="accent_purple">#9C7AFF</color>
     <color name="accent_yellow">#FFD54F</color>
 
-    <color name="text_primary">#F0F0FF</color>
-    <color name="text_secondary">#9090B0</color>
-    <color name="text_tertiary">#606080</color>
+    <color name="text_primary">#F4F7FB</color>
+    <color name="text_secondary">#A8B6C7</color>
+    <color name="text_tertiary">#74869A</color>
     <color name="text_hint">#505070</color>
     <color name="text_accent">#00D4FF</color>
     <color name="text_danger">#FF6060</color>
 
     <color name="divider">#252538</color>
-    <color name="toolbar_bg">#E60A0A14</color>
-    <color name="toolbar_stroke">#1AFFFFFF</color>
+    <color name="toolbar_bg">#E61A2230</color>
+    <color name="toolbar_stroke">#334A6070</color>
 
     <!-- Tool button states -->
     <color name="tool_idle_bg">#00000000</color>

@@ -38,7 +38,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
     @Volatile private var separationRunning = false
 
     private val meshColors = listOf(
-        "#00D4FF","#FF7043","#4CAF82","#FFD54F",
+        "#62E6FF","#FF9B71","#4CAF82","#FFD54F",
         "#AB47BC","#EC407A","#26C6DA","#D4E157"
     )
 
@@ -60,7 +60,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
             setPadding(0, 14, 0, 0)
             addView(View(ctx).apply {
-                setBackgroundColor(Color.parseColor("#404058"))
+                setBackgroundColor(Color.parseColor("#607286"))
                 layoutParams = LinearLayout.LayoutParams(48, 4)
             })
         })
@@ -80,7 +80,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         })
         val tvCount = TextView(ctx).apply {
             text = "–"; textSize = 11f
-            setTextColor(Color.parseColor("#00D4FF"))
+            setTextColor(Color.parseColor("#62E6FF"))
             background = ctx.getDrawable(R.drawable.bg_pill)
             setPadding(14, 4, 14, 4)
         }
@@ -89,7 +89,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         root.addView(titleRow)
 
         root.addView(View(ctx).apply {
-            setBackgroundColor(Color.parseColor("#1A1A28"))
+            setBackgroundColor(Color.parseColor("#243445"))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 1).apply { setMargins(0, 10, 0, 0) }
         })
@@ -146,7 +146,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         })
         texts.addView(TextView(ctx).apply {
             text = "Split disconnected geometry into individual selectable groups"
-            textSize = 11f; setTextColor(Color.parseColor("#606080")); setPadding(0, 4, 0, 0)
+            textSize = 11f; setTextColor(Color.parseColor("#74869A")); setPadding(0, 4, 0, 0)
         })
         headRow.addView(texts)
         card.addView(headRow)
@@ -159,17 +159,17 @@ class MeshListFragment : BottomSheetDialogFragment() {
         // ── Island filter: drop tiny dust islands after separation ──────────
         card.addView(TextView(ctx).apply {
             text = "Skip islands smaller than"; textSize = 10f
-            setTextColor(Color.parseColor("#606080"))
+            setTextColor(Color.parseColor("#74869A"))
         })
         val tvMinFaces = TextView(ctx).apply {
             text = "1 face  ·  keep everything"; textSize = 10f
-            setTextColor(Color.parseColor("#00D4FF")); setPadding(0, 2, 0, 4)
+            setTextColor(Color.parseColor("#62E6FF")); setPadding(0, 2, 0, 4)
         }
         card.addView(tvMinFaces)
         card.addView(SeekBar(ctx).apply {
             max = 999; progress = 0
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
-            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
+            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
             setPadding(0, 0, 0, 6)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onProgressChanged(b: SeekBar, p: Int, fromUser: Boolean) {
@@ -190,7 +190,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
             text = "⬡  Separate Meshes"
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(Color.parseColor("#00D4FF"))
+            setTextColor(Color.parseColor("#62E6FF"))
             background = ctx.getDrawable(R.drawable.bg_btn_accent)
             layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 52)
             setOnClickListener { if (!separationRunning) startSeparation() }
@@ -202,7 +202,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         val pb = android.widget.ProgressBar(ctx, null,
             android.R.attr.progressBarStyleHorizontal).apply {
             max = 100; progress = 0
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 6
             ).apply { setMargins(0, 8, 0, 0) }
@@ -212,7 +212,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
 
         val tvProg = TextView(ctx).apply {
             text = ""; textSize = 10f
-            setTextColor(Color.parseColor("#606080")); setPadding(0, 4, 0, 0)
+            setTextColor(Color.parseColor("#74869A")); setPadding(0, 4, 0, 0)
             visibility = View.GONE
         }
         tvProgress = tvProg; card.addView(tvProg)
@@ -342,7 +342,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         if (meshCount == 0) {
             listContainer?.addView(TextView(ctx).apply {
                 text = "No model loaded"
-                textSize = 13f; setTextColor(Color.parseColor("#606080"))
+                textSize = 13f; setTextColor(Color.parseColor("#74869A"))
                 gravity = android.view.Gravity.CENTER; setPadding(0, 24, 0, 0)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
@@ -351,7 +351,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         }
         listContainer?.addView(TextView(ctx).apply {
             text = "MESH ISLANDS"; textSize = 9f; letterSpacing = 0.14f
-            setTextColor(Color.parseColor("#505070")); setPadding(6, 10, 0, 6)
+            setTextColor(Color.parseColor("#607286")); setPadding(6, 10, 0, 6)
         })
         for (i in 0 until meshCount) {
             listContainer?.addView(buildMeshRow(ctx, i))
@@ -420,13 +420,13 @@ class MeshListFragment : BottomSheetDialogFragment() {
         header.addView(TextView(ctx).apply {
             text = name; textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(if (isSel) Color.parseColor("#00D4FF") else Color.WHITE)
+            setTextColor(if (isSel) Color.parseColor("#62E6FF") else Color.WHITE)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
 
         val tvVerts = TextView(ctx).apply {
             text = "…"; textSize = 10f
-            setTextColor(Color.parseColor("#505070")); setPadding(0, 0, 8, 0)
+            setTextColor(Color.parseColor("#607286")); setPadding(0, 0, 8, 0)
         }
         header.addView(tvVerts)
         Thread({
@@ -442,7 +442,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
 
         val btnVis = ImageButton(ctx).apply {
             setImageResource(if (isVis) R.drawable.ic_visibility else R.drawable.ic_visibility_off)
-            setColorFilter(if (isVis) Color.parseColor("#00D4FF") else Color.parseColor("#404060"))
+            setColorFilter(if (isVis) Color.parseColor("#62E6FF") else Color.parseColor("#404060"))
             background = null
             layoutParams = LinearLayout.LayoutParams(36, 36).apply { setMargins(0, 0, 4, 0) }
             setOnClickListener {
@@ -450,14 +450,14 @@ class MeshListFragment : BottomSheetDialogFragment() {
                 visibilityMap[idx] = nv
                 (activity as? MainActivity)?.glView?.queueEvent { NativeLib.nativeSetMeshVisible(idx, nv) }
                 setImageResource(if (nv) R.drawable.ic_visibility else R.drawable.ic_visibility_off)
-                setColorFilter(if (nv) Color.parseColor("#00D4FF") else Color.parseColor("#404060"))
+                setColorFilter(if (nv) Color.parseColor("#62E6FF") else Color.parseColor("#404060"))
             }
         }
         header.addView(btnVis)
 
         val btnDel = ImageButton(ctx).apply {
             setImageResource(android.R.drawable.ic_menu_delete)
-            setColorFilter(Color.parseColor("#FF7043"))
+            setColorFilter(Color.parseColor("#FF9B71"))
             background = null
             layoutParams = LinearLayout.LayoutParams(36, 36)
             setOnClickListener {
@@ -481,7 +481,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         card.addView(header)
 
         val tvSize = TextView(ctx).apply {
-            textSize = 10f; setTextColor(Color.parseColor("#505070")); setPadding(20, 4, 0, 0)
+            textSize = 10f; setTextColor(Color.parseColor("#607286")); setPadding(20, 4, 0, 0)
         }
         Thread({
             val s = try { NativeLib.nativeGetMeshSizeMM(idx) } catch (_: Exception) { FloatArray(3) { 0f } }
@@ -510,7 +510,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         })
         container.addView(TextView(ctx).apply {
             text = "RESIZE MESH  (mm)"; textSize = 9f; letterSpacing = 0.14f
-            setTextColor(Color.parseColor("#00D4FF")); setPadding(0, 0, 0, 8)
+            setTextColor(Color.parseColor("#62E6FF")); setPadding(0, 0, 0, 8)
         })
 
         // Get size non-blocking - use cached 50f as default until loaded
@@ -541,7 +541,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
             orientation = LinearLayout.HORIZONTAL; setPadding(0, 10, 0, 0)
             addView(Button(ctx).apply {
                 text = "Apply"; textSize = 11f
-                setTextColor(Color.parseColor("#00D4FF"))
+                setTextColor(Color.parseColor("#62E6FF"))
                 background = ctx.getDrawable(R.drawable.bg_btn_accent)
                 layoutParams = LinearLayout.LayoutParams(0, 44, 1f).apply { setMargins(0, 0, 8, 0) }
                 setOnClickListener {
@@ -562,7 +562,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
             })
             addView(Button(ctx).apply {
                 text = "Reset"; textSize = 11f
-                setTextColor(Color.parseColor("#FF7043"))
+                setTextColor(Color.parseColor("#FF9B71"))
                 background = ctx.getDrawable(R.drawable.bg_btn_danger)
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 44)
                 setPadding(16, 0, 16, 0)
@@ -602,7 +602,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
         }
         row.addView(et)
         row.addView(TextView(ctx).apply {
-            text = " mm"; textSize = 10f; setTextColor(Color.parseColor("#505070"))
+            text = " mm"; textSize = 10f; setTextColor(Color.parseColor("#607286"))
         })
         container.addView(row)
         return et

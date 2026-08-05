@@ -84,7 +84,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
         tvSelected = TextView(ctx).apply {
             text = "Long-press a mesh in the viewport to select it."
             textSize = 11f
-            setTextColor(Color.parseColor("#FF7043"))
+            setTextColor(Color.parseColor("#FF9B71"))
             background = ctx.getDrawable(R.drawable.bg_hint_card)
             setPadding(16, 12, 16, 12)
             layoutParams = LinearLayout.LayoutParams(
@@ -125,7 +125,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
         root.addView(sectionLabel(ctx, "SCALE  (uniform multiplier)"))
         tvScaleVal = TextView(ctx).apply {
             text = "× 1.00"; textSize = 10f
-            setTextColor(Color.parseColor("#606080"))
+            setTextColor(Color.parseColor("#74869A"))
             setPadding(20, 2, 20, 0)
         }
         root.addView(tvScaleVal!!)
@@ -137,7 +137,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
         root.addView(divider(ctx))
 
         // ── RESET BUTTON ──────────────────────────────────────────────────────
-        root.addView(actionButton(ctx, "↺  Reset This Mesh's Transform", "#FF7043") {
+        root.addView(actionButton(ctx, "↺  Reset This Mesh's Transform", "#FF9B71") {
             val idx = selectedIdx
             if (idx < 0) { toastNoSelection(); return@actionButton }
             val glv = (activity as? MainActivity)?.glView ?: return@actionButton
@@ -152,7 +152,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
         root.addView(sectionLabel(ctx, "MESH STATISTICS"))
         tvStats = TextView(ctx).apply {
             text = "Tap Analyze to compute mesh statistics"
-            textSize = 10f; setTextColor(Color.parseColor("#606080"))
+            textSize = 10f; setTextColor(Color.parseColor("#74869A"))
             background = ctx.getDrawable(R.drawable.bg_hint_card)
             setPadding(16, 14, 16, 14)
             layoutParams = LinearLayout.LayoutParams(
@@ -161,7 +161,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
             ).apply { setMargins(14, 4, 14, 0) }
         }
         root.addView(tvStats!!)
-        root.addView(actionButton(ctx, "📊  Analyze Selected Mesh", "#00D4FF") {
+        root.addView(actionButton(ctx, "📊  Analyze Selected Mesh", "#62E6FF") {
             val idx = selectedIdx
             if (idx < 0) { toastNoSelection(); return@actionButton }
             loadStats(idx)
@@ -177,13 +177,13 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
         var decimPct = 0.5f
         val tvDecimInfo = TextView(ctx).apply {
             text = "Target: 50% of original faces"; textSize = 10f
-            setTextColor(Color.parseColor("#606080")); setPadding(20, 2, 20, 0)
+            setTextColor(Color.parseColor("#74869A")); setPadding(20, 2, 20, 0)
         }
         val decimSlider = SeekBar(ctx).apply {
             this.max = 100
             progress = 50
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#FF9800"))
-            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#FF9800"))
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#FFB86B"))
+            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#FFB86B"))
             setPadding(20, 8, 20, 0)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onStartTrackingTouch(b: SeekBar) {}
@@ -198,7 +198,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
         root.addView(decimSlider)
         root.addView(tvDecimInfo)
 
-        root.addView(actionButton(ctx, "▶  Run Decimation on Selected Mesh", "#FF9800") {
+        root.addView(actionButton(ctx, "▶  Run Decimation on Selected Mesh", "#FFB86B") {
             val idx = selectedIdx
             if (idx < 0) { toastNoSelection(); return@actionButton }
             val glv = (activity as? MainActivity)?.glView ?: return@actionButton
@@ -254,7 +254,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
             text = ""; textSize = 10f; setTextColor(Color.parseColor("#4CAF82"))
             setPadding(20, 4, 20, 0)
         }
-        root.addView(actionButton(ctx, "✂  Remove Zero-Area Faces", "#FF7043") {
+        root.addView(actionButton(ctx, "✂  Remove Zero-Area Faces", "#FF9B71") {
             val idx = selectedIdx
             if (idx < 0) { toastNoSelection(); return@actionButton }
             val glv = (activity as? MainActivity)?.glView ?: return@actionButton
@@ -384,7 +384,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
         val idx = selectedIdx
         if (idx < 0) {
             tvSelected?.text = "Long-press a mesh in the viewport to select it."
-            tvSelected?.setTextColor(Color.parseColor("#FF7043"))
+            tvSelected?.setTextColor(Color.parseColor("#FF9B71"))
             return
         }
         (activity as? MainActivity)?.glView?.queueEvent {
@@ -433,7 +433,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
     ): SeekBar {
         parent.addView(TextView(ctx).apply {
             text = axis; textSize = 11f
-            setTextColor(Color.parseColor("#9090B0")); setPadding(20, 8, 20, 2)
+            setTextColor(Color.parseColor("#A8B6C7")); setPadding(20, 8, 20, 2)
         })
         val sb = makeSlider(ctx, min, max, init, onChange)
         parent.addView(sb)
@@ -446,8 +446,8 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
     ): SeekBar = SeekBar(ctx).apply {
         this.max = STEPS
         progress = ((init - min) / (max - min) * STEPS).toInt().coerceIn(0, STEPS)
-        progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
-        thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+        progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
+        thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
         setPadding(20, 4, 20, 4)
         setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(b: SeekBar, p: Int, fromUser: Boolean) {
@@ -478,7 +478,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
     private fun handle(ctx: Context) = LinearLayout(ctx).apply {
         gravity = android.view.Gravity.CENTER_HORIZONTAL; setPadding(0, 14, 0, 0)
         addView(View(ctx).apply {
-            setBackgroundColor(Color.parseColor("#404058"))
+            setBackgroundColor(Color.parseColor("#607286"))
             layoutParams = LinearLayout.LayoutParams(48, 4)
         })
     }
@@ -494,18 +494,18 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
             })
             addView(TextView(ctx).apply {
                 text = badge; textSize = 8f; letterSpacing = 0.12f
-                setTextColor(Color.parseColor("#FF9800"))
+                setTextColor(Color.parseColor("#FFB86B"))
                 background = ctx.getDrawable(R.drawable.bg_pill); setPadding(10, 3, 10, 3)
             })
         }
 
     private fun sectionLabel(ctx: Context, text: String) = TextView(ctx).apply {
         this.text = text; textSize = 9f; letterSpacing = 0.14f
-        setTextColor(Color.parseColor("#00D4FF")); setPadding(20, 18, 20, 6)
+        setTextColor(Color.parseColor("#62E6FF")); setPadding(20, 18, 20, 6)
     }
 
     private fun divider(ctx: Context) = View(ctx).apply {
-        setBackgroundColor(Color.parseColor("#1A1A28"))
+        setBackgroundColor(Color.parseColor("#243445"))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
     }
 
@@ -523,7 +523,7 @@ class MeshToolsFragment : BottomSheetDialogFragment() {
     }
 
     private fun infoLabel(ctx: Context, msg: String) = TextView(ctx).apply {
-        text = msg; textSize = 9f; setTextColor(Color.parseColor("#505070"))
+        text = msg; textSize = 9f; setTextColor(Color.parseColor("#607286"))
         setPadding(20, 2, 20, 4)
     }
 

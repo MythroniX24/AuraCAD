@@ -116,11 +116,11 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
     private fun sectionLabel(ctx: android.content.Context, text: String) = TextView(ctx).apply {
         this.text = text; textSize = 9f; letterSpacing = 0.14f
-        setTextColor(Color.parseColor("#00D4FF")); setPadding(20, 18, 20, 6)
+        setTextColor(Color.parseColor("#62E6FF")); setPadding(20, 18, 20, 6)
     }
 
     private fun divider(ctx: android.content.Context) = View(ctx).apply {
-        setBackgroundColor(Color.parseColor("#1A1A28"))
+        setBackgroundColor(Color.parseColor("#243445"))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
     }
 
@@ -132,7 +132,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         (activity as? MainActivity)?.glView?.queueEvent(block)
 
     private fun infoCard(ctx: android.content.Context, msg: String) = TextView(ctx).apply {
-        text = msg; textSize = 10f; setTextColor(Color.parseColor("#505070"))
+        text = msg; textSize = 10f; setTextColor(Color.parseColor("#607286"))
         background = ctx.getDrawable(R.drawable.bg_hint_card)
         setPadding(16, 12, 16, 12)
         layoutParams = LinearLayout.LayoutParams(
@@ -169,7 +169,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         root.addView(LinearLayout(ctx).apply {
             gravity = android.view.Gravity.CENTER_HORIZONTAL; setPadding(0, 14, 0, 0)
             addView(View(ctx).apply {
-                setBackgroundColor(Color.parseColor("#404058"))
+                setBackgroundColor(Color.parseColor("#607286"))
                 layoutParams = LinearLayout.LayoutParams(48, 4)
             })
         })
@@ -188,14 +188,14 @@ class RingToolFragment : BottomSheetDialogFragment() {
             addView(TextView(ctx).apply {
                 text = "AI"
                 textSize = 9f; letterSpacing = 0.12f
-                setTextColor(Color.parseColor("#050508"))
+                setTextColor(Color.parseColor("#061018"))
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 background = ctx.getDrawable(R.drawable.bg_btn_accent); setPadding(10, 3, 10, 3)
             })
             addView(TextView(ctx).apply {
                 text = "v5"
                 textSize = 9f; letterSpacing = 0.12f
-                setTextColor(Color.parseColor("#00D4FF"))
+                setTextColor(Color.parseColor("#62E6FF"))
                 background = ctx.getDrawable(R.drawable.bg_pill)
                 setPadding(10, 3, 10, 3)
                 layoutParams = LinearLayout.LayoutParams(
@@ -218,12 +218,12 @@ class RingToolFragment : BottomSheetDialogFragment() {
         // Detection status + info
         tvStatus = TextView(ctx).apply {
             text = "⚠  No ring detected yet — tap Detect below"; textSize = 10f
-            setTextColor(Color.parseColor("#FF7043")); setPadding(20, 8, 20, 2)
+            setTextColor(Color.parseColor("#FF9B71")); setPadding(20, 8, 20, 2)
         }
         root.addView(tvStatus)
         tvInfo = TextView(ctx).apply {
             text = ""; textSize = 10f
-            setTextColor(Color.parseColor("#606080")); setPadding(20, 0, 20, 6)
+            setTextColor(Color.parseColor("#74869A")); setPadding(20, 0, 20, 6)
         }
         root.addView(tvInfo)
 
@@ -233,7 +233,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(20, 6, 20, 0)
             addView(TextView(ctx).apply {
                 text = "Mesh:"; textSize = 11f
-                setTextColor(Color.parseColor("#9090B0")); setPadding(0, 0, 12, 0)
+                setTextColor(Color.parseColor("#A8B6C7")); setPadding(0, 0, 12, 0)
             })
             val etIdx = EditText(ctx).apply {
                 inputType = InputType.TYPE_CLASS_NUMBER
@@ -256,7 +256,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         // Detect button
         val btnDetect = Button(ctx).apply {
             text = "▶  Detect Ring Geometry"
-            textSize = 12f; setTextColor(Color.parseColor("#050508"))
+            textSize = 12f; setTextColor(Color.parseColor("#061018"))
             setTypeface(null, android.graphics.Typeface.BOLD)
             background = ctx.getDrawable(R.drawable.bg_btn_accent)
             layoutParams = LinearLayout.LayoutParams(
@@ -269,7 +269,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         // ── Live summary card (after detection) ───────────────────────────────
         tvSummary = TextView(ctx).apply {
             text = ""; textSize = 10f
-            setTextColor(Color.parseColor("#00D4FF"))
+            setTextColor(Color.parseColor("#62E6FF"))
             background = ctx.getDrawable(R.drawable.bg_hint_card)
             setPadding(16, 12, 16, 12)
             layoutParams = LinearLayout.LayoutParams(
@@ -285,12 +285,12 @@ class RingToolFragment : BottomSheetDialogFragment() {
             gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(20, 8, 20, 0)
             addView(TextView(ctx).apply {
                 text = "🔗 Proportional resize (scale all)"; textSize = 11f
-                setTextColor(Color.parseColor("#9090B0"))
+                setTextColor(Color.parseColor("#A8B6C7"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
             addView(Switch(ctx).apply {
                 isChecked = false
-                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+                thumbTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
                 trackTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#1A3D50"))
                 setOnCheckedChangeListener { _, v -> proportional = v }
             })
@@ -301,7 +301,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             header    = "BAND WIDTH  (Wall)",
             desc      = "Outer wall expands · inner bore fixed",
             unit      = "mm",
-            accentHex = "#00D4FF",
+            accentHex = "#62E6FF",
             step      = 0.25f,
             onSbInit  = { sb -> sbBandWidth = sb },
             onEtInit  = { et -> etBandWidth = et },
@@ -315,7 +315,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             header    = "INNER DIAMETER  (Ring Size)",
             desc      = "Hole resizes · wall thickness stays",
             unit      = "mm",
-            accentHex = "#FF9800",
+            accentHex = "#FFB86B",
             step      = 0.5f,
             onSbInit  = { sb -> sbInnerDia = sb },
             onEtInit  = { et -> etInnerDia = et },
@@ -335,7 +335,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             header    = "HEIGHT  (Axial)",
             desc      = "Stretch / squash along ring axis",
             unit      = "mm",
-            accentHex = "#7C4DFF",
+            accentHex = "#A78BFA",
             step      = 0.5f,
             onSbInit  = { sb -> sbHeight = sb },
             onEtInit  = { et -> etHeight = et },
@@ -352,7 +352,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             gravity = android.view.Gravity.CENTER_VERTICAL; setPadding(20, 4, 20, 0)
             addView(TextView(ctx).apply {
                 text = "Target size:"; textSize = 11f
-                setTextColor(Color.parseColor("#9090B0")); setPadding(0, 0, 10, 0)
+                setTextColor(Color.parseColor("#A8B6C7")); setPadding(0, 0, 10, 0)
             })
             val et = EditText(ctx).apply {
                 inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -366,7 +366,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             etAiTarget = et
             addView(et)
             addView(Button(ctx).apply {
-                text = "⚙"; textSize = 14f; setTextColor(Color.parseColor("#00D4FF"))
+                text = "⚙"; textSize = 14f; setTextColor(Color.parseColor("#62E6FF"))
                 background = ctx.getDrawable(R.drawable.bg_card_dark)
                 layoutParams = LinearLayout.LayoutParams(48, 44).apply { setMargins(8, 0, 0, 0) }
                 setOnClickListener { openAiSettings() }
@@ -374,7 +374,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         })
         val btnAiFit = Button(ctx).apply {
             text = "✨  AI Fit My Ring"
-            textSize = 12f; setTextColor(Color.parseColor("#050508"))
+            textSize = 12f; setTextColor(Color.parseColor("#061018"))
             setTypeface(null, android.graphics.Typeface.BOLD)
             background = ctx.getDrawable(R.drawable.bg_btn_accent)
             layoutParams = LinearLayout.LayoutParams(
@@ -389,7 +389,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         }
         root.addView(aiStatus)
         aiNote = TextView(ctx).apply {
-            text = ""; textSize = 10f; setTextColor(Color.parseColor("#9090B0"))
+            text = ""; textSize = 10f; setTextColor(Color.parseColor("#A8B6C7"))
             setLineSpacing(0f, 1.25f); setPadding(20, 0, 20, 0)
             background = ctx.getDrawable(R.drawable.bg_hint_card)
             layoutParams = LinearLayout.LayoutParams(
@@ -400,7 +400,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         root.addView(aiNote)
         btnApplyAi = Button(ctx).apply {
             text = "✓  Apply AI Sizing"
-            textSize = 12f; setTextColor(Color.parseColor("#050508"))
+            textSize = 12f; setTextColor(Color.parseColor("#061018"))
             setTypeface(null, android.graphics.Typeface.BOLD)
             background = ctx.getDrawable(R.drawable.bg_btn_accent)
             visibility = View.GONE
@@ -416,7 +416,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             orientation = LinearLayout.HORIZONTAL; setPadding(20, 12, 20, 0)
             addView(Button(ctx).apply {
                 text = "↺ Reset"; textSize = 11f
-                setTextColor(Color.parseColor("#FF7043"))
+                setTextColor(Color.parseColor("#FF9B71"))
                 background = ctx.getDrawable(R.drawable.bg_btn_danger); setPadding(20, 0, 20, 0)
                 layoutParams = LinearLayout.LayoutParams(
                     LinearLayout.LayoutParams.WRAP_CONTENT, 44).apply { setMargins(0, 0, 12, 0) }
@@ -430,7 +430,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             })
             addView(Button(ctx).apply {
                 text = "Re-Detect"; textSize = 11f
-                setTextColor(Color.parseColor("#9090B0"))
+                setTextColor(Color.parseColor("#A8B6C7"))
                 background = ctx.getDrawable(R.drawable.bg_card_dark); setPadding(20, 0, 20, 0)
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 44)
                 setOnClickListener { btnDetect.performClick() }
@@ -602,14 +602,14 @@ class RingToolFragment : BottomSheetDialogFragment() {
         presetRow?.removeAllViews()
         presetRow?.addView(TextView(ctx).apply {
             text = "US: "; textSize = 10f
-            setTextColor(Color.parseColor("#9090B0"))
+            setTextColor(Color.parseColor("#A8B6C7"))
             gravity = android.view.Gravity.CENTER_VERTICAL
             setPadding(0, 0, 6, 0)
         })
         usPresets.forEach { (us, diaMM) ->
             presetRow?.addView(Button(ctx).apply {
                 text = "$us"; textSize = 10f
-                setTextColor(Color.parseColor("#00D4FF"))
+                setTextColor(Color.parseColor("#62E6FF"))
                 background = ctx.getDrawable(R.drawable.bg_card_dark)
                 setPadding(0, 0, 0, 0)
                 layoutParams = LinearLayout.LayoutParams(52, 36).apply { setMargins(0, 0, 6, 0) }
@@ -691,8 +691,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
         onChange:   (Float) -> Unit
     ): LinearLayout {
         val accent = Color.parseColor(accentHex)
-        val isOuter = accentHex == "#00D4FF"
-        val isH     = accentHex == "#7C4DFF"
+        val isOuter = accentHex == "#62E6FF"
+        val isH     = accentHex == "#A78BFA"
 
         val card = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -709,7 +709,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             setTextColor(Color.parseColor(accentHex)); setPadding(16, 14, 16, 0)
         })
         card.addView(TextView(ctx).apply {
-            text = desc; textSize = 9f; setTextColor(Color.parseColor("#505070"))
+            text = desc; textSize = 9f; setTextColor(Color.parseColor("#607286"))
             setPadding(16, 3, 16, 8)
         })
 
@@ -734,7 +734,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         }
         onEtInit(et); inputRow.addView(et)
         inputRow.addView(TextView(ctx).apply {
-            text = " $unit"; textSize = 12f; setTextColor(Color.parseColor("#505070"))
+            text = " $unit"; textSize = 12f; setTextColor(Color.parseColor("#607286"))
         })
         fun applyValue(v: Float) {
             val txt = "%.2f".format(v)
@@ -758,7 +758,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
         val tvInfo = TextView(ctx).apply {
             text = ""; textSize = 10f
-            setTextColor(Color.parseColor("#606080")); setPadding(16, 6, 16, 0)
+            setTextColor(Color.parseColor("#74869A")); setPadding(16, 6, 16, 0)
         }
         onInfoInit(tvInfo); card.addView(tvInfo)
 

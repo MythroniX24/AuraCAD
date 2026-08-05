@@ -1,574 +1,330 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.coordinatorlayout.widget.CoordinatorLayout
-    xmlns:android="http://schemas.android.com/apk/res/android"
+<androidx.coordinatorlayout.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_deepest">
 
-    <!-- ════════════════════════════════════════════════════════════════════
-         FULL-SCREEN 3D CANVAS  ·  the GL surface fills the entire screen.
-         The top bar and bottom toolbar overlay it with translucent chrome.
-         ════════════════════════════════════════════════════════════════════ -->
     <com.modelviewer3d.ModelGLSurfaceView
         android:id="@+id/glSurface"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"/>
+        android:layout_height="match_parent" />
 
-    <!-- ════════════════════════════════════════════════════════════════════
-         TOP BAR  ·  Undo  Redo  Reset  · ⋯ overflow · FPS
-         ════════════════════════════════════════════════════════════════════ -->
+    <!-- New floating command header -->
     <LinearLayout
         android:id="@+id/topBar"
         android:layout_width="match_parent"
-        android:layout_height="56dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:paddingStart="12dp"
-        android:paddingEnd="8dp"
-        android:background="@drawable/bg_top_bar"
-        android:elevation="8dp">
-
-        <!-- App mark -->
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:gravity="center_vertical">
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="3D"
-                android:textColor="@color/accent_cyan"
-                android:textSize="18sp"
-                android:textStyle="bold"
-                android:fontFamily="monospace"
-                android:lineSpacingExtra="-2dp"/>
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="STUDIO"
-                android:textColor="#55FFFFFF"
-                android:textSize="8sp"
-                android:letterSpacing="0.25"
-                android:fontFamily="monospace"/>
-        </LinearLayout>
-
-        <Space android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1"/>
-
-        <!-- Primary actions: Undo  Redo  Reset -->
-        <ImageButton android:id="@+id/btnUndo"
-            style="@style/TopBarBtn"
-            android:src="@drawable/ic_undo"
-            android:contentDescription="Undo"/>
-
-        <ImageButton android:id="@+id/btnRedo"
-            style="@style/TopBarBtn"
-            android:src="@drawable/ic_redo"
-            android:contentDescription="Redo"/>
-
-        <ImageButton android:id="@+id/btnReset"
-            style="@style/TopBarBtn"
-            android:src="@drawable/ic_reset"
-            android:contentDescription="Reset Camera"/>
-
-        <!-- AI Assistant → Gemini Ring Fit + AI settings -->
-        <ImageButton android:id="@+id/btnAi"
-            style="@style/TopBarBtn"
-            android:src="@drawable/ic_ai"
-            android:contentDescription="AI Assistant"/>
-
-        <View android:layout_width="1dp" android:layout_height="24dp"
-            android:background="#22FFFFFF"
-            android:layout_marginStart="6dp" android:layout_marginEnd="6dp"/>
-
-        <!-- Overflow ⋯ — opens menu with Open / Edit / Mesh List / Ruler / Screenshot / Export / AI -->
-        <ImageButton android:id="@+id/btnOverflow"
-            style="@style/TopBarBtn"
-            android:src="@drawable/ic_more"
-            android:contentDescription="More"/>
-
-        <!-- FPS -->
-        <TextView
-            android:id="@+id/tvFps"
-            android:layout_width="36dp"
-            android:layout_height="wrap_content"
-            android:text="--"
-            android:textColor="#5500D4FF"
-            android:textSize="9sp"
-            android:fontFamily="monospace"
-            android:gravity="end"
-            android:paddingStart="4dp"/>
-    </LinearLayout>
-
-    <!-- ════════════════════════════════════════════════════════════════════
-         SELECTION INDICATOR CHIP  ·  visible when a mesh is selected
-         ════════════════════════════════════════════════════════════════════ -->
-    <LinearLayout
-        android:id="@+id/selectionChip"
-        android:layout_width="wrap_content"
-        android:layout_height="40dp"
-        android:layout_gravity="top|center_horizontal"
-        android:layout_marginTop="68dp"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top"
+        android:layout_marginStart="14dp"
+        android:layout_marginTop="12dp"
+        android:layout_marginEnd="14dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:paddingStart="14dp"
-        android:paddingEnd="6dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="10dp"
+        android:background="@drawable/bg_top_bar"
+        android:elevation="10dp">
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="AURA"
+                android:textColor="@color/accent_cyan"
+                android:textSize="17sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.18" />
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CAD  /  3D WORKSPACE"
+                android:textColor="@color/text_tertiary"
+                android:textSize="7sp"
+                android:letterSpacing="0.14" />
+        </LinearLayout>
+
+        <View android:layout_width="1dp" android:layout_height="28dp"
+            android:layout_marginStart="14dp" android:layout_marginEnd="12dp"
+            android:background="@color/divider" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+            <TextView
+                android:id="@+id/tvStatusFile"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Untitled scene"
+                android:textColor="@color/text_primary"
+                android:textSize="12sp"
+                android:singleLine="true"
+                android:ellipsize="end" />
+            <TextView
+                android:id="@+id/tvFps"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="READY  ·  -- FPS"
+                android:textColor="@color/text_tertiary"
+                android:textSize="8sp"
+                android:letterSpacing="0.08" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnUndo"
+            style="@style/TopBarBtn"
+            android:src="@drawable/ic_undo"
+            android:contentDescription="Undo" />
+        <ImageButton
+            android:id="@+id/btnRedo"
+            style="@style/TopBarBtn"
+            android:src="@drawable/ic_redo"
+            android:contentDescription="Redo" />
+        <ImageButton
+            android:id="@+id/btnReset"
+            style="@style/TopBarBtn"
+            android:src="@drawable/ic_reset"
+            android:contentDescription="Reset camera" />
+        <ImageButton
+            android:id="@+id/btnAi"
+            style="@style/TopBarBtnAccent"
+            android:src="@drawable/ic_ai"
+            android:contentDescription="AI Assistant" />
+        <ImageButton
+            android:id="@+id/btnOverflow"
+            style="@style/TopBarBtn"
+            android:src="@drawable/ic_more"
+            android:contentDescription="Workspace menu" />
+    </LinearLayout>
+
+    <!-- Context chip, intentionally small and out of the model's way -->
+    <LinearLayout
+        android:id="@+id/selectionChip"
+        android:layout_width="wrap_content"
+        android:layout_height="36dp"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="92dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
         android:background="@drawable/bg_selection_chip"
-        android:elevation="6dp"
+        android:elevation="8dp"
         android:visibility="gone">
-
         <View
-            android:layout_width="8dp"
-            android:layout_height="8dp"
+            android:layout_width="7dp"
+            android:layout_height="7dp"
+            android:layout_marginEnd="8dp"
             android:background="@drawable/bg_pill"
-            android:backgroundTint="@color/accent_cyan"
-            android:layout_marginEnd="8dp"/>
-
+            android:backgroundTint="@color/accent_cyan" />
         <TextView
             android:id="@+id/tvSelectionLabel"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="No selection"
+            android:text="Selected mesh"
             android:textColor="@color/text_primary"
-            android:textSize="12sp"
-            android:fontFamily="monospace"
-            android:maxWidth="200dp"
+            android:textSize="11sp"
             android:singleLine="true"
-            android:ellipsize="end"/>
-
+            android:maxWidth="190dp"
+            android:ellipsize="end" />
         <ImageButton
             android:id="@+id/btnSelectionClear"
-            android:layout_width="32dp"
-            android:layout_height="32dp"
-            android:layout_marginStart="6dp"
-            android:padding="6dp"
+            android:layout_width="30dp"
+            android:layout_height="30dp"
+            android:padding="7dp"
             android:src="@drawable/ic_close"
             android:tint="@color/text_secondary"
             android:background="?attr/selectableItemBackgroundBorderless"
-            android:contentDescription="Clear selection"/>
+            android:contentDescription="Clear selection" />
     </LinearLayout>
 
-    <!-- ════════════════════════════════════════════════════════════════════
-         CENTER HINT  ·  shown when no model loaded
-         ════════════════════════════════════════════════════════════════════ -->
+    <!-- Empty-state onboarding card -->
     <LinearLayout
         android:id="@+id/tvHint"
-        android:layout_width="280dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_gravity="center"
+        android:layout_marginStart="28dp"
+        android:layout_marginEnd="28dp"
         android:orientation="vertical"
-        android:gravity="center"
-        android:padding="32dp"
+        android:padding="24dp"
         android:background="@drawable/bg_hint_card">
-
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="📦"
-            android:textSize="52sp"
-            android:gravity="center"/>
-
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="AuraCAD"
+            android:text="YOUR MODEL,\nYOUR WORKFLOW"
             android:textColor="@color/text_primary"
-            android:textSize="20sp"
+            android:textSize="24sp"
             android:textStyle="bold"
-            android:gravity="center"
-            android:paddingTop="10dp"
-            android:fontFamily="monospace"/>
-
+            android:letterSpacing="0.03" />
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="Open a 3D model to begin"
-            android:textColor="@color/text_tertiary"
+            android:layout_marginTop="10dp"
+            android:text="Import a model to start designing, measuring, and preparing it for export."
+            android:textColor="@color/text_secondary"
             android:textSize="12sp"
-            android:gravity="center"
-            android:paddingTop="4dp"/>
-
-        <LinearLayout
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:gravity="center"
-            android:paddingTop="16dp">
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="OBJ" android:textColor="@color/accent_cyan"
-                android:background="@drawable/bg_pill" android:textSize="10sp"
-                android:paddingStart="12dp" android:paddingEnd="12dp"
-                android:paddingTop="5dp" android:paddingBottom="5dp"
-                android:layout_marginEnd="6dp"/>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="STL" android:textColor="@color/accent_cyan"
-                android:background="@drawable/bg_pill" android:textSize="10sp"
-                android:paddingStart="12dp" android:paddingEnd="12dp"
-                android:paddingTop="5dp" android:paddingBottom="5dp"
-                android:layout_marginEnd="6dp"/>
-            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="GLB" android:textColor="@color/accent_cyan"
-                android:background="@drawable/bg_pill" android:textSize="10sp"
-                android:paddingStart="12dp" android:paddingEnd="12dp"
-                android:paddingTop="5dp" android:paddingBottom="5dp"/>
-        </LinearLayout>
-
+            android:lineSpacingExtra="3dp" />
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:orientation="vertical"
-            android:paddingTop="18dp">
+            android:layout_marginTop="18dp"
+            android:orientation="horizontal">
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="1 finger  →  rotate" android:textColor="#383858"
-                android:textSize="10sp" android:paddingBottom="2dp"/>
+                android:text="OBJ" android:textColor="@color/accent_cyan" android:textSize="9sp"
+                android:background="@drawable/bg_pill" android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:paddingTop="5dp" android:paddingBottom="5dp" android:layout_marginEnd="6dp" />
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="2 fingers →  zoom / pan" android:textColor="#383858"
-                android:textSize="10sp" android:paddingBottom="2dp"/>
+                android:text="STL" android:textColor="@color/accent_cyan" android:textSize="9sp"
+                android:background="@drawable/bg_pill" android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:paddingTop="5dp" android:paddingBottom="5dp" android:layout_marginEnd="6dp" />
             <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:text="long-press →  select mesh" android:textColor="#383858"
-                android:textSize="10sp"/>
+                android:text="GLB" android:textColor="@color/accent_cyan" android:textSize="9sp"
+                android:background="@drawable/bg_pill" android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:paddingTop="5dp" android:paddingBottom="5dp" android:layout_marginEnd="6dp" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="PLY" android:textColor="@color/accent_cyan" android:textSize="9sp"
+                android:background="@drawable/bg_pill" android:paddingStart="10dp" android:paddingEnd="10dp"
+                android:paddingTop="5dp" android:paddingBottom="5dp" />
         </LinearLayout>
-
         <Button
+            android:id="@+id/btnOpenHint"
             android:layout_width="match_parent"
             android:layout_height="48dp"
-            android:text="Open Model"
-            android:textColor="@color/accent_cyan"
-            android:textSize="13sp"
-            android:background="@drawable/bg_btn_accent"
             android:layout_marginTop="20dp"
-            android:id="@+id/btnOpenHint"/>
+            android:text="OPEN MODEL"
+            android:textColor="@color/bg_deepest"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:letterSpacing="0.08"
+            android:background="@drawable/bg_btn_accent" />
     </LinearLayout>
 
-    <!-- ════════════════════════════════════════════════════════════════════
-         BOTTOM TOOLBAR  ·  Select  Move  Rotate  Scale  Ring
-         5 thumb-friendly equal-weight tools, one active at a time.
-         ════════════════════════════════════════════════════════════════════ -->
-    <LinearLayout
-        android:id="@+id/bottomToolbar"
-        android:layout_width="match_parent"
-        android:layout_height="76dp"
-        android:layout_gravity="bottom"
-        android:orientation="horizontal"
-        android:background="@drawable/bg_bottom_bar"
-        android:paddingStart="6dp"
-        android:paddingEnd="6dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
-        android:elevation="8dp">
-
-        <!-- Select -->
-        <LinearLayout
-            android:id="@+id/btnToolSelect"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginStart="3dp"
-            android:layout_marginEnd="3dp"
-            android:background="@drawable/bg_tool_button"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/icToolSelect"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
-                android:src="@drawable/ic_select"
-                android:tint="@color/tool_idle_icon"/>
-            <TextView
-                android:id="@+id/lblToolSelect"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Select"
-                android:textColor="@color/tool_idle_label"
-                android:textSize="10sp"
-                android:paddingTop="3dp"
-                android:fontFamily="monospace"/>
-        </LinearLayout>
-
-        <!-- Move -->
-        <LinearLayout
-            android:id="@+id/btnToolMove"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginStart="3dp"
-            android:layout_marginEnd="3dp"
-            android:background="@drawable/bg_tool_button"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/icToolMove"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
-                android:src="@drawable/ic_move"
-                android:tint="@color/tool_idle_icon"/>
-            <TextView
-                android:id="@+id/lblToolMove"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Move"
-                android:textColor="@color/tool_idle_label"
-                android:textSize="10sp"
-                android:paddingTop="3dp"
-                android:fontFamily="monospace"/>
-        </LinearLayout>
-
-        <!-- Rotate -->
-        <LinearLayout
-            android:id="@+id/btnToolRotate"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginStart="3dp"
-            android:layout_marginEnd="3dp"
-            android:background="@drawable/bg_tool_button"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/icToolRotate"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
-                android:src="@drawable/ic_rotate"
-                android:tint="@color/tool_idle_icon"/>
-            <TextView
-                android:id="@+id/lblToolRotate"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Rotate"
-                android:textColor="@color/tool_idle_label"
-                android:textSize="10sp"
-                android:paddingTop="3dp"
-                android:fontFamily="monospace"/>
-        </LinearLayout>
-
-        <!-- Scale -->
-        <LinearLayout
-            android:id="@+id/btnToolScale"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginStart="3dp"
-            android:layout_marginEnd="3dp"
-            android:background="@drawable/bg_tool_button"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/icToolScale"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
-                android:src="@drawable/ic_scale"
-                android:tint="@color/tool_idle_icon"/>
-            <TextView
-                android:id="@+id/lblToolScale"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Scale"
-                android:textColor="@color/tool_idle_label"
-                android:textSize="10sp"
-                android:paddingTop="3dp"
-                android:fontFamily="monospace"/>
-        </LinearLayout>
-
-        <!-- Ring -->
-        <LinearLayout
-            android:id="@+id/btnToolRing"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center"
-            android:layout_marginStart="3dp"
-            android:layout_marginEnd="3dp"
-            android:background="@drawable/bg_tool_button"
-            android:clickable="true"
-            android:focusable="true">
-            <ImageView
-                android:id="@+id/icToolRing"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
-                android:src="@drawable/ic_ring"
-                android:tint="@color/tool_idle_icon"/>
-            <TextView
-                android:id="@+id/lblToolRing"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Ring"
-                android:textColor="@color/tool_idle_label"
-                android:textSize="10sp"
-                android:paddingTop="3dp"
-                android:fontFamily="monospace"/>
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- ════════════════════════════════════════════════════════════════════
-         STATUS BAR  ·  sits just above the bottom toolbar, hidden by default
-         ════════════════════════════════════════════════════════════════════ -->
+    <!-- Compact scene status, shown after loading -->
     <LinearLayout
         android:id="@+id/statusBar"
-        android:layout_width="match_parent"
-        android:layout_height="30dp"
-        android:layout_gravity="bottom"
-        android:layout_marginBottom="76dp"
+        android:layout_width="wrap_content"
+        android:layout_height="32dp"
+        android:layout_gravity="top|start"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="92dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="14dp"
-        android:paddingEnd="14dp"
-        android:background="#CC080812"
-        android:elevation="6dp"
+        android:paddingStart="12dp"
+        android:paddingEnd="12dp"
+        android:background="@drawable/bg_status_bar"
+        android:elevation="7dp"
         android:visibility="gone">
-
-        <TextView
-            android:id="@+id/tvStatusMeshes"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="● 1 mesh"
-            android:textColor="@color/accent_cyan"
-            android:textSize="10sp"
-            android:fontFamily="monospace"/>
-
-        <View android:layout_width="1dp" android:layout_height="12dp"
-            android:background="#25FFFFFF"
-            android:layout_marginStart="10dp" android:layout_marginEnd="10dp"/>
-
-        <TextView
-            android:id="@+id/tvStatusVerts"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="0 verts"
-            android:textColor="@color/text_hint"
-            android:textSize="10sp"
-            android:fontFamily="monospace"/>
-
-        <TextView
-            android:id="@+id/tvStatusFile"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text=""
-            android:textColor="#383858"
-            android:textSize="10sp"
-            android:singleLine="true"
-            android:ellipsize="end"
-            android:maxWidth="140dp"/>
+        <TextView android:id="@+id/tvStatusMeshes" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="0 meshes" android:textColor="@color/accent_cyan" android:textSize="9sp" />
+        <View android:layout_width="1dp" android:layout_height="12dp" android:layout_marginStart="9dp" android:layout_marginEnd="9dp" android:background="@color/divider" />
+        <TextView android:id="@+id/tvStatusVerts" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="0 verts" android:textColor="@color/text_secondary" android:textSize="9sp" />
     </LinearLayout>
 
-    <!-- ════════════════════════════════════════════════════════════════════
-         RULER OVERLAY  ·  appears above status bar / bottom toolbar
-         ════════════════════════════════════════════════════════════════════ -->
+    <!-- Ruler HUD -->
     <LinearLayout
         android:id="@+id/rulerOverlay"
         android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_gravity="bottom|start"
-        android:layout_marginBottom="106dp"
+        android:layout_height="52dp"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="14dp"
+        android:layout_marginEnd="14dp"
+        android:layout_marginBottom="104dp"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="16dp"
-        android:paddingEnd="12dp"
-        android:background="#EE080E1C"
-        android:visibility="gone"
-        android:elevation="7dp">
-
-        <TextView android:text="📐" android:textSize="16sp"
-            android:layout_width="wrap_content" android:layout_height="wrap_content"
-            android:paddingEnd="10dp"/>
-
-        <TextView
-            android:id="@+id/tvRulerInfo"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="Tap mesh surface — Point 1"
-            android:textColor="@color/text_primary"
-            android:textSize="12sp"/>
-
-        <Button
-            android:id="@+id/btnClearRuler"
-            android:layout_width="wrap_content"
-            android:layout_height="32dp"
-            android:text="Clear"
-            android:textSize="10sp"
-            android:textColor="@color/accent_cyan"
-            android:background="@drawable/bg_btn_accent"
-            android:paddingStart="14dp"
-            android:paddingEnd="14dp"/>
+        android:paddingStart="14dp"
+        android:paddingEnd="8dp"
+        android:background="@drawable/bg_status_bar"
+        android:elevation="9dp"
+        android:visibility="gone">
+        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:text="RULER" android:textColor="@color/accent_orange" android:textSize="9sp" android:textStyle="bold" android:paddingEnd="12dp" />
+        <TextView android:id="@+id/tvRulerInfo" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:text="Tap a point on the model" android:textColor="@color/text_primary" android:textSize="11sp" />
+        <Button android:id="@+id/btnClearRuler" android:layout_width="wrap_content" android:layout_height="34dp"
+            android:text="CLEAR" android:textSize="9sp" android:textColor="@color/accent_orange" android:background="@drawable/bg_btn_danger" />
     </LinearLayout>
 
-    <!-- ════════════════════════════════════════════════════════════════════
-         LOADING OVERLAY
-         ════════════════════════════════════════════════════════════════════ -->
+    <!-- New bottom command dock -->
+    <LinearLayout
+        android:id="@+id/bottomToolbar"
+        android:layout_width="match_parent"
+        android:layout_height="88dp"
+        android:layout_gravity="bottom"
+        android:layout_marginStart="10dp"
+        android:layout_marginEnd="10dp"
+        android:layout_marginBottom="10dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:padding="6dp"
+        android:background="@drawable/bg_bottom_bar"
+        android:elevation="10dp">
+
+        <LinearLayout android:id="@+id/btnToolSelect" style="@style/ToolDockItem">
+            <ImageView android:id="@+id/icToolSelect" style="@style/ToolDockIcon" android:src="@drawable/ic_select" />
+            <TextView android:id="@+id/lblToolSelect" style="@style/ToolDockLabel" android:text="SELECT" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnToolMove" style="@style/ToolDockItem">
+            <ImageView android:id="@+id/icToolMove" style="@style/ToolDockIcon" android:src="@drawable/ic_move" />
+            <TextView android:id="@+id/lblToolMove" style="@style/ToolDockLabel" android:text="MOVE" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnToolRotate" style="@style/ToolDockItem">
+            <ImageView android:id="@+id/icToolRotate" style="@style/ToolDockIcon" android:src="@drawable/ic_rotate" />
+            <TextView android:id="@+id/lblToolRotate" style="@style/ToolDockLabel" android:text="ROTATE" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnToolScale" style="@style/ToolDockItem">
+            <ImageView android:id="@+id/icToolScale" style="@style/ToolDockIcon" android:src="@drawable/ic_scale" />
+            <TextView android:id="@+id/lblToolScale" style="@style/ToolDockLabel" android:text="SCALE" />
+        </LinearLayout>
+        <LinearLayout android:id="@+id/btnToolRing" style="@style/ToolDockItem">
+            <ImageView android:id="@+id/icToolRing" style="@style/ToolDockIcon" android:src="@drawable/ic_ring" />
+            <TextView android:id="@+id/lblToolRing" style="@style/ToolDockLabel" android:text="RING" />
+        </LinearLayout>
+    </LinearLayout>
+
+    <!-- Loading state -->
     <FrameLayout
         android:id="@+id/loadingOverlay"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:background="#D0050508"
-        android:visibility="gone"
-        android:elevation="12dp">
-
+        android:background="#CC050811"
+        android:elevation="20dp"
+        android:visibility="gone">
         <LinearLayout
-            android:layout_width="200dp"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_gravity="center"
+            android:layout_margin="32dp"
             android:orientation="vertical"
-            android:gravity="center"
-            android:background="@drawable/bg_hint_card"
-            android:padding="32dp">
-
-            <ProgressBar
-                android:layout_width="48dp"
-                android:layout_height="48dp"
-                android:indeterminate="true"
-                android:indeterminateTint="@color/accent_cyan"/>
-
-            <TextView
-                android:id="@+id/tvLoading"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Loading…"
-                android:textColor="@color/text_primary"
-                android:textSize="13sp"
-                android:gravity="center"
-                android:paddingTop="14dp"/>
-
-            <TextView
-                android:id="@+id/tvLoadingDetail"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text=""
-                android:textColor="#404060"
-                android:textSize="10sp"
-                android:gravity="center"
-                android:paddingTop="4dp"/>
+            android:padding="24dp"
+            android:background="@drawable/bg_hint_card">
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="PREPARING SCENE" android:textColor="@color/accent_cyan" android:textSize="10sp" android:letterSpacing="0.16" />
+            <ProgressBar android:layout_width="match_parent" android:layout_height="3dp" android:layout_marginTop="16dp"
+                android:indeterminate="true" android:indeterminateTint="@color/accent_cyan" />
+            <TextView android:id="@+id/tvLoading" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="Loading model…" android:textColor="@color/text_primary" android:textSize="15sp" android:textStyle="bold" android:layout_marginTop="16dp" />
+            <TextView android:id="@+id/tvLoadingDetail" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="" android:textColor="@color/text_secondary" android:textSize="10sp" android:layout_marginTop="6dp" />
         </LinearLayout>
     </FrameLayout>
 
-    <!-- ════════════════════════════════════════════════════════════════════
-         LEGACY HIDDEN BUTTONS  ·  preserved so MainActivity's existing
-         findViewById wiring keeps working without touching feature logic.
-         The overflow ⋯ menu programmatically performs clicks on these,
-         and the bottom-toolbar Ring tool delegates to btnRingTool.
-         ════════════════════════════════════════════════════════════════════ -->
-    <LinearLayout
-        android:id="@+id/legacyContainer"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone">
-        <View android:id="@+id/btnOpen"        android:layout_width="1dp" android:layout_height="1dp"/>
-        <View android:id="@+id/btnEdit"        android:layout_width="1dp" android:layout_height="1dp"/>
-        <View android:id="@+id/btnMeshList"    android:layout_width="1dp" android:layout_height="1dp"/>
-        <View android:id="@+id/btnRuler"       android:layout_width="1dp" android:layout_height="1dp"/>
-        <View android:id="@+id/btnRingTool"    android:layout_width="1dp" android:layout_height="1dp"/>
-        <View android:id="@+id/btnMeshTools"   android:layout_width="1dp" android:layout_height="1dp"/>
-        <View android:id="@+id/btnExport"      android:layout_width="1dp" android:layout_height="1dp"/>
-        <View android:id="@+id/btnScreenshot"  android:layout_width="1dp" android:layout_height="1dp"/>
+    <!-- Kept hidden only as a compatibility bridge for existing feature wiring. -->
+    <LinearLayout android:id="@+id/legacyContainer" android:layout_width="0dp" android:layout_height="0dp" android:visibility="gone">
+        <View android:id="@+id/btnOpen" android:layout_width="1dp" android:layout_height="1dp" />
+        <View android:id="@+id/btnEdit" android:layout_width="1dp" android:layout_height="1dp" />
+        <View android:id="@+id/btnMeshList" android:layout_width="1dp" android:layout_height="1dp" />
+        <View android:id="@+id/btnRuler" android:layout_width="1dp" android:layout_height="1dp" />
+        <View android:id="@+id/btnRingTool" android:layout_width="1dp" android:layout_height="1dp" />
+        <View android:id="@+id/btnMeshTools" android:layout_width="1dp" android:layout_height="1dp" />
+        <View android:id="@+id/btnExport" android:layout_width="1dp" android:layout_height="1dp" />
+        <View android:id="@+id/btnScreenshot" android:layout_width="1dp" android:layout_height="1dp" />
     </LinearLayout>
-
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

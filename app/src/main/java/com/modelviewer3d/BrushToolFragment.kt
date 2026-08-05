@@ -57,7 +57,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
             gravity = android.view.Gravity.CENTER_HORIZONTAL
             setPadding(0, 14, 0, 0)
             addView(View(ctx).apply {
-                setBackgroundColor(Color.parseColor("#404058"))
+                setBackgroundColor(Color.parseColor("#607286"))
                 layoutParams = LinearLayout.LayoutParams(48, 4)
             })
         })
@@ -77,7 +77,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
             addView(TextView(ctx).apply {
                 text = "SCULPT"
                 textSize = 8f; letterSpacing = 0.12f
-                setTextColor(Color.parseColor("#FF9800"))
+                setTextColor(Color.parseColor("#FFB86B"))
                 background = ctx.getDrawable(R.drawable.bg_pill)
                 setPadding(10, 3, 10, 3)
             })
@@ -104,7 +104,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
                 text = "⬡  Sculpt"
                 textSize = 12f
                 background = ctx.getDrawable(R.drawable.bg_btn_secondary)
-                setTextColor(Color.parseColor("#9090B0"))
+                setTextColor(Color.parseColor("#A8B6C7"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 setOnClickListener { setMode(MODE_SCULPT) }
             }
@@ -118,13 +118,13 @@ class BrushToolFragment : BottomSheetDialogFragment() {
         root.addView(sectionLabel(ctx, "RADIUS  (mm)"))
         tvRadius = TextView(ctx).apply {
             text = "1.00 mm"; textSize = 10f
-            setTextColor(Color.parseColor("#00D4FF")); setPadding(20, 2, 20, 0)
+            setTextColor(Color.parseColor("#62E6FF")); setPadding(20, 2, 20, 0)
         }
         root.addView(tvRadius!!)
         root.addView(SeekBar(ctx).apply {
             max = 100; progress = 10           // 0.1 – 10 mm range
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
-            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#00D4FF"))
+            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
+            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
             setPadding(20, 4, 20, 4)
             setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
                 override fun onStartTrackingTouch(b: SeekBar) {}
@@ -143,7 +143,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
         root.addView(sectionLabel(ctx, "STRENGTH  (smooth 0-1 / sculpt ± mm)"))
         tvStrength = TextView(ctx).apply {
             text = "0.50"; textSize = 10f
-            setTextColor(Color.parseColor("#00D4FF")); setPadding(20, 2, 20, 0)
+            setTextColor(Color.parseColor("#62E6FF")); setPadding(20, 2, 20, 0)
         }
         root.addView(tvStrength!!)
         root.addView(SeekBar(ctx).apply {
@@ -179,13 +179,13 @@ class BrushToolFragment : BottomSheetDialogFragment() {
             setPadding(20, 4, 20, 4)
             addView(TextView(ctx).apply {
                 text = "Auto (active selection)"; textSize = 11f
-                setTextColor(Color.parseColor("#9090B0"))
+                setTextColor(Color.parseColor("#A8B6C7"))
                 layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             })
             addView(Button(ctx).apply {
                 text = "Use Selected"
                 textSize = 9f
-                setTextColor(Color.parseColor("#00D4FF"))
+                setTextColor(Color.parseColor("#62E6FF"))
                 background = ctx.getDrawable(R.drawable.bg_btn_secondary)
                 setPadding(16, 0, 16, 0)
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, 36)
@@ -198,7 +198,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
                             else
                                 "⚠ No mesh selected — long-press one in the viewport first"
                             tvStatus?.setTextColor(if (meshIdx >= 0)
-                                Color.parseColor("#4CAF82") else Color.parseColor("#FF7043"))
+                                Color.parseColor("#4CAF82") else Color.parseColor("#FF9B71"))
                         }
                     }
                 }
@@ -211,7 +211,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
         tvStatus = TextView(ctx).apply {
             text = "Tap \"Use Selected\" to choose a mesh, then tap the model to paint."
             textSize = 10f
-            setTextColor(Color.parseColor("#9090B0"))
+            setTextColor(Color.parseColor("#A8B6C7"))
             background = ctx.getDrawable(R.drawable.bg_hint_card)
             setPadding(16, 12, 16, 12)
             layoutParams = LinearLayout.LayoutParams(
@@ -235,7 +235,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
         if (idx < 0) {
             activity?.runOnUiThread {
                 tvStatus?.text = "⚠ Tap \"Use Selected\" first to choose a target mesh."
-                tvStatus?.setTextColor(Color.parseColor("#FF7043"))
+                tvStatus?.setTextColor(Color.parseColor("#FF9B71"))
             }
             return
         }
@@ -245,7 +245,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
             if (pt == null || pt.size < 3) {
                 activity?.runOnUiThread {
                     tvStatus?.text = "⚠ No surface hit — tap directly on the mesh"
-                    tvStatus?.setTextColor(Color.parseColor("#FF7043"))
+                    tvStatus?.setTextColor(Color.parseColor("#FF9B71"))
                 }
                 return@glRun
             }
@@ -258,7 +258,7 @@ class BrushToolFragment : BottomSheetDialogFragment() {
                 tvStatus?.text = if (ok) "✓ Brush applied at (%.2f, %.2f, %.2f)".format(pt[0], pt[1], pt[2])
                                  else "✗ No vertices in range — try a larger radius"
                 tvStatus?.setTextColor(if (ok) Color.parseColor("#4CAF82")
-                                        else Color.parseColor("#9090B0"))
+                                        else Color.parseColor("#A8B6C7"))
             }
         }
     }
@@ -270,12 +270,12 @@ class BrushToolFragment : BottomSheetDialogFragment() {
         val secondaryBg = requireContext().getDrawable(R.drawable.bg_btn_secondary)
         if (mode == MODE_SMOOTH) {
             btnSmooth?.background = accentBg;   btnSmooth?.setTextColor(Color.WHITE)
-            btnSculpt?.background = secondaryBg; btnSculpt?.setTextColor(Color.parseColor("#9090B0"))
+            btnSculpt?.background = secondaryBg; btnSculpt?.setTextColor(Color.parseColor("#A8B6C7"))
             tvStrength?.text = "0.50"
             strength = 0.5f
         } else {
             btnSculpt?.background = accentBg;   btnSculpt?.setTextColor(Color.WHITE)
-            btnSmooth?.background = secondaryBg; btnSmooth?.setTextColor(Color.parseColor("#9090B0"))
+            btnSmooth?.background = secondaryBg; btnSmooth?.setTextColor(Color.parseColor("#A8B6C7"))
             tvStrength?.text = "0.00 mm"
             strength = 0f
         }
@@ -287,11 +287,11 @@ class BrushToolFragment : BottomSheetDialogFragment() {
     private fun sectionLabel(ctx: android.content.Context, text: String) =
         TextView(ctx).apply {
             this.text = text; textSize = 9f; letterSpacing = 0.14f
-            setTextColor(Color.parseColor("#00D4FF")); setPadding(20, 18, 20, 6)
+            setTextColor(Color.parseColor("#62E6FF")); setPadding(20, 18, 20, 6)
         }
 
     private fun divider(ctx: android.content.Context) = View(ctx).apply {
-        setBackgroundColor(Color.parseColor("#1A1A28"))
+        setBackgroundColor(Color.parseColor("#243445"))
         layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1)
     }
 
