@@ -93,12 +93,20 @@ JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeRebuildContext(JNI
 }
 
 // ── Two-step load ────────────────────────────────────────────────────────────
+// IMPORTANT: parseModel runs on the IO thread and may be called BEFORE the GL
+// surface exists (cold start via ACTION_VIEW/ACTION_SEND, or the user picking
+// a file faster than surface creation).  Parsing itself makes NO GL calls, so
+// we lazily create the Renderer here if nativeInit hasn't run yet — otherwise
+// LOCK_OR_FALSE() would return JNI_FALSE and the model would never appear in
+// the preview.  nativeInit (GL thread) later calls init() on the same object.
 JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeParseModel(JNIEnv* env,jclass,jstring path){
-    LOCK_OR_FALSE();
+    LOCK_RENDERER();
+    if(!g_renderer) g_renderer = std::make_unique<Renderer>();
     return g_renderer->parseModel(jstr(env,path)) ? JNI_TRUE : JNI_FALSE;
 }
 JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeUploadParsed(JNIEnv*,jclass){
-    LOCK_OR_FALSE();
+    LOCK_RENDERER();
+    if(!g_renderer) g_renderer = std::make_unique<Renderer>();
     bool ok = g_renderer->uploadParsed();
     if(ok){
         // Pull a working copy for separation.  The renderer keeps the original

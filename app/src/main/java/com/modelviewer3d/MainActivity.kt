@@ -100,7 +100,7 @@ class MainActivity : AppCompatActivity() {
     // back / backgrounds the app mid-load, parsing keeps running and a
     // notification announces completion.  lifecycleScope would cancel the job.
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private var loadingInBackground = false
+    @Volatile private var loadingInBackground = false
 
     private var btnUndo: View? = null
     private var btnRedo: View? = null
@@ -285,7 +285,12 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    override fun onResume()  { super.onResume();  glView.onResume()  }
+    override fun onResume()  { super.onResume();  glView.onResume()
+        // Ensure a frame renders after returning to the app — covers the
+        // background-load path where the upload event was queued while the
+        // GL thread was paused (it runs on resume, and this triggers the draw).
+        glView.requestRender()
+    }
     override fun onPause()   { super.onPause();   glView.onPause()   }
     override fun onDestroy() {
         try { unregisterReceiver(separationCpuDoneReceiver) } catch (_: Exception) {}
@@ -796,6 +801,14 @@ class MainActivity : AppCompatActivity() {
                     }
                     return@launch
                 }
+                // GLTF (JSON) isn't supported — only GLB is. Give a clear message
+                // instead of a confusing "Failed to parse".
+                if (name.lowercase().endsWith(".gltf")) {
+                    withContext(Dispatchers.Main) {
+                        toast("GLTF (JSON) isn't bundled — please use GLB / STL / OBJ / PLY / 3DS.")
+                    }
+                    return@launch
+                }
 
                 // Delete old cached model files to prevent storage bloat
                 cacheDir.listFiles { f -> f.extension.lowercase() in
@@ -830,7 +843,17 @@ class MainActivity : AppCompatActivity() {
                     try { uploadOk = NativeLib.nativeUploadParsed() } catch (_: Exception) {}
                     latch.countDown()
                 }
-                latch.await()
+                // Background-load path: the GL thread is paused while the app is
+                // backgrounded, so the queued upload runs on next resume. Don't
+                // block the IO coroutine forever — notify from parse success and
+                // let the model appear when the user returns.
+                if (loadingInBackground) {
+                    withContext(Dispatchers.Main) {
+                        notifyLoad("AuraCAD", "✅ $name loaded — tap to view")
+                    }
+                } else {
+                    latch.await()
+                }
                 val wasBackgrounded = loadingInBackground
                 withContext(Dispatchers.Main) {
                     hideLoading()
@@ -841,6 +864,10 @@ class MainActivity : AppCompatActivity() {
                         } else {
                             toast("✓ $name loaded")
                         }
+                        updateStatusBar()
+                    } else if (wasBackgrounded) {
+                        // Upload is queued and will run on next resume — the
+                        // model WILL appear, so don't show a false failure toast.
                         updateStatusBar()
                     } else {
                         toast("GPU upload failed")
