@@ -7,35 +7,26 @@ import android.os.Looper
 import android.view.*
 import android.widget.*
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
-import java.util.concurrent.CountDownLatch
 
 /**
- * Mesh Separation Panel
- * 
- * Separation uses plain Thread (NOT coroutines/lifecycleScope) to avoid
- * lifecycle cancellation issues when the dialog is interacted with.
- * 
- * Flow:
- *   1. Background Thread → nativePerformSeparationCPU()  (heavy CPU)
- *   2. GL Thread via queueEvent → nativePerformSeparationGPU()  (GPU upload)
- *   3. Main Thread via Handler.post → update UI
+ * Mesh List Panel — clean list of the loaded model's meshes.
+ *
+ * Each row shows the mesh name, vertex count, size in mm, and offers:
+ *   • Eye toggle  — show/hide that mesh on the canvas
+ *   • Delete      — remove the mesh
+ *   • Tap to select — pick the mesh (highlights it on the canvas)
+ *   • Resize (mm) — set exact W/H/D for the selected mesh
  */
 class MeshListFragment : BottomSheetDialogFragment() {
 
-    private var isSeparated   = false
-    private var meshCount     = 0
-    private var selectedIdx   = -1
+    private var meshCount   = 0
+    private var selectedIdx = -1
     private val visibilityMap = mutableMapOf<Int, Boolean>()
 
     private var listContainer: LinearLayout? = null
-    private var btnSeparate:   Button?       = null
-    private var progressBar:   android.widget.ProgressBar? = null
-    private var tvProgress:    TextView?     = null
-    private var separateCard:  View?         = null
-    private var tvIslandTitle: TextView?     = null
+    private var tvCount: TextView?           = null
 
     private val uiHandler = Handler(Looper.getMainLooper())
-    @Volatile private var separationRunning = false
 
     private val meshColors = listOf(
         "#62E6FF","#FF9B71","#4CAF82","#FFD54F",
@@ -72,20 +63,20 @@ class MeshListFragment : BottomSheetDialogFragment() {
             setPadding(20, 14, 20, 4)
         }
         titleRow.addView(TextView(ctx).apply {
-            text = "⬡  Mesh Separation"
+            text = "🧊  Mesh List"
             textSize = 16f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setTextColor(Color.WHITE)
             layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
         })
-        val tvCount = TextView(ctx).apply {
+        val tvCnt = TextView(ctx).apply {
             text = "–"; textSize = 11f
             setTextColor(Color.parseColor("#62E6FF"))
             background = ctx.getDrawable(R.drawable.bg_pill)
             setPadding(14, 4, 14, 4)
         }
-        tvIslandTitle = tvCount
-        titleRow.addView(tvCount)
+        tvCount = tvCnt
+        titleRow.addView(tvCnt)
         root.addView(titleRow)
 
         root.addView(View(ctx).apply {
@@ -93,10 +84,6 @@ class MeshListFragment : BottomSheetDialogFragment() {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 1).apply { setMargins(0, 10, 0, 0) }
         })
-
-        val sepCard = buildSeparateCard(ctx)
-        separateCard = sepCard
-        root.addView(sepCard)
 
         val lc = LinearLayout(ctx).apply {
             orientation = LinearLayout.VERTICAL
@@ -114,224 +101,13 @@ class MeshListFragment : BottomSheetDialogFragment() {
         super.onDestroyView()
     }
 
-    // ── Separate card ─────────────────────────────────────────────────────────
-    private fun buildSeparateCard(ctx: android.content.Context): LinearLayout {
-        val card = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(20, 20, 20, 20)
-            setBackgroundResource(R.drawable.bg_card_dark)
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(14, 16, 14, 8) }
-        }
-
-        val headRow = LinearLayout(ctx).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-        }
-        headRow.addView(TextView(ctx).apply {
-            text = "⬡"; textSize = 28f
-            layoutParams = LinearLayout.LayoutParams(52, LinearLayout.LayoutParams.WRAP_CONTENT)
-            gravity = android.view.Gravity.CENTER
-        })
-        val texts = LinearLayout(ctx).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        texts.addView(TextView(ctx).apply {
-            text = "Separate Mesh Islands"; textSize = 14f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(Color.WHITE)
-        })
-        texts.addView(TextView(ctx).apply {
-            text = "Split disconnected geometry into individual selectable groups"
-            textSize = 11f; setTextColor(Color.parseColor("#74869A")); setPadding(0, 4, 0, 0)
-        })
-        headRow.addView(texts)
-        card.addView(headRow)
-
-        card.addView(TextView(ctx).apply {
-            text = "⚠ Large models may take a minute"
-            textSize = 10f; setTextColor(Color.parseColor("#805050")); setPadding(0, 12, 0, 4)
-        })
-
-        // ── Island filter: drop tiny dust islands after separation ──────────
-        card.addView(TextView(ctx).apply {
-            text = "Skip islands smaller than"; textSize = 10f
-            setTextColor(Color.parseColor("#74869A"))
-        })
-        val tvMinFaces = TextView(ctx).apply {
-            text = "1 face  ·  keep everything"; textSize = 10f
-            setTextColor(Color.parseColor("#62E6FF")); setPadding(0, 2, 0, 4)
-        }
-        card.addView(tvMinFaces)
-        card.addView(SeekBar(ctx).apply {
-            max = 999; progress = 0
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
-            thumbTintList    = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
-            setPadding(0, 0, 0, 6)
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(b: SeekBar, p: Int, fromUser: Boolean) {
-                    if (!fromUser) return
-                    val n = p + 1
-                    tvMinFaces.text = if (n == 1) "1 face  ·  keep everything"
-                                     else "$n faces  ·  drops tiny dust islands"
-                    (activity as? MainActivity)?.glView?.queueEvent {
-                        NativeLib.nativeSetSeparationMinFaces(n)
-                    }
-                }
-                override fun onStartTrackingTouch(b: SeekBar) {}
-                override fun onStopTrackingTouch(b: SeekBar) {}
-            })
-        })
-
-        val btn = Button(ctx).apply {
-            text = "⬡  Separate Meshes"
-            textSize = 13f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(Color.parseColor("#62E6FF"))
-            background = ctx.getDrawable(R.drawable.bg_btn_accent)
-            layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 52)
-            setOnClickListener { if (!separationRunning) startSeparation() }
-        }
-        btnSeparate = btn
-        card.addView(btn)
-
-        // Progress bar (hidden until separation starts)
-        val pb = android.widget.ProgressBar(ctx, null,
-            android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100; progress = 0
-            progressTintList = android.content.res.ColorStateList.valueOf(Color.parseColor("#62E6FF"))
-            layoutParams = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, 6
-            ).apply { setMargins(0, 8, 0, 0) }
-            visibility = View.GONE
-        }
-        progressBar = pb; card.addView(pb)
-
-        val tvProg = TextView(ctx).apply {
-            text = ""; textSize = 10f
-            setTextColor(Color.parseColor("#74869A")); setPadding(0, 4, 0, 0)
-            visibility = View.GONE
-        }
-        tvProgress = tvProg; card.addView(tvProg)
-
-        return card
-    }
-
-    // ── SEPARATION — plain Thread, no coroutines, no lifecycle dependency ─────
-    private fun startSeparation() {
-        val main = activity as? MainActivity ?: return
-        separationRunning = true
-        btnSeparate?.isEnabled = false
-        btnSeparate?.text = "⏳  Separating…"
-
-        // Progress polling on main thread via Handler
-        progressBar?.visibility = View.VISIBLE
-        progressBar?.progress = 0
-        tvProgress?.visibility = View.VISIBLE
-        tvProgress?.text = "Starting…"
-
-        val progressRunnable = object : Runnable {
-            override fun run() {
-                if (!separationRunning) return
-                val p = try { NativeLib.nativeGetSeparationProgress() } catch (_: Exception) { 0 }
-                progressBar?.progress = p
-                tvProgress?.text = "Step %d of 6 — %d%%".format(
-                    when { p < 12 -> 1; p < 45 -> 2; p < 65 -> 3; p < 72 -> 4; p < 78 -> 5; else -> 6 }, p)
-                btnSeparate?.text = "⏳  Separating… $p%%"
-                uiHandler.postDelayed(this, 200)
-            }
-        }
-        uiHandler.postDelayed(progressRunnable, 200)
-
-        // CPU work on plain background Thread — no lifecycle dependency
-        Thread({
-            var cpuOk = false
-            try {
-                cpuOk = NativeLib.nativePerformSeparationCPU()
-            } catch (e: Exception) {
-                android.util.Log.e("MeshList", "CPU separation error: ${e.message}")
-            }
-
-            if (!cpuOk) {
-                uiHandler.post {
-                    uiHandler.removeCallbacks(progressRunnable)
-                    separationRunning = false
-                    btnSeparate?.text = "⬡  Separate Meshes"
-                    btnSeparate?.isEnabled = true
-                    toast("Model has 1 connected mesh — nothing to separate")
-                }
-                return@Thread
-            }
-
-            // GPU upload on GL thread, block this background thread until done
-            val latch = CountDownLatch(1)
-            var gpuOk = false
-            var mc = 0
-            main.glView.queueEvent {
-                try {
-                    gpuOk = NativeLib.nativePerformSeparationGPU()
-                    mc = NativeLib.nativeGetMeshCount()
-                } catch (e: Exception) {
-                    android.util.Log.e("MeshList", "GPU separation error: ${e.message}")
-                } finally {
-                    latch.countDown()
-                }
-            }
-
-            try { latch.await() } catch (_: Exception) {}
-
-            val finalGpuOk = gpuOk
-            val finalMc = mc
-
-            // Back to main thread for UI update
-            uiHandler.post {
-                uiHandler.removeCallbacks(progressRunnable)
-                separationRunning = false
-
-                if (finalGpuOk && finalMc > 1) {
-                    isSeparated = true
-                    meshCount = finalMc
-                    separateCard?.visibility = View.GONE
-                    for (i in 0 until meshCount)
-                        if (!visibilityMap.containsKey(i)) visibilityMap[i] = true
-                    tvIslandTitle?.text = "$finalMc"
-                    if (isAdded) buildMeshList(requireContext())
-                    main.updateStatusBar()
-                    progressBar?.visibility = View.GONE
-                    tvProgress?.visibility = View.GONE
-                    toast("✅ $finalMc mesh islands separated!")
-                } else {
-                    btnSeparate?.text = "⬡  Separate Meshes"
-                    btnSeparate?.isEnabled = true
-                    progressBar?.visibility = View.GONE
-                    tvProgress?.visibility = View.GONE
-                    toast("1 connected mesh — no islands to separate")
-                }
-            }
-        }, "MeshSeparationThread").start()
-    }
-
     private fun refreshState(ctx: android.content.Context) {
         Thread({
-            val sep = try { NativeLib.nativeIsSeparated() } catch (_: Exception) { false }
-            val mc  = try { NativeLib.nativeGetMeshCount() } catch (_: Exception) { 0 }
+            val mc = try { NativeLib.nativeGetMeshCount() } catch (_: Exception) { 0 }
             uiHandler.post {
-                isSeparated = sep
                 meshCount = mc
-                if (isSeparated && meshCount > 1) {
-                    separateCard?.visibility = View.GONE
-                    for (i in 0 until meshCount)
-                        if (!visibilityMap.containsKey(i)) visibilityMap[i] = true
-                    tvIslandTitle?.text = "$meshCount"
-                    if (isAdded) buildMeshList(ctx)
-                } else {
-                    separateCard?.visibility = View.VISIBLE
-                    listContainer?.removeAllViews()
-                    tvIslandTitle?.text = "–"
-                }
+                tvCount?.text = if (mc > 0) "$mc" else "–"
+                if (isAdded) buildMeshList(ctx)
             }
         }, "MeshRefreshThread").start()
     }
@@ -350,44 +126,13 @@ class MeshListFragment : BottomSheetDialogFragment() {
             return
         }
         listContainer?.addView(TextView(ctx).apply {
-            text = "MESH ISLANDS"; textSize = 9f; letterSpacing = 0.14f
+            text = "MESHES"; textSize = 9f; letterSpacing = 0.14f
             setTextColor(Color.parseColor("#607286")); setPadding(6, 10, 0, 6)
         })
         for (i in 0 until meshCount) {
             listContainer?.addView(buildMeshRow(ctx, i))
             listContainer?.addView(View(ctx).apply {
                 layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 6)
-            })
-        }
-
-        // ── Combine everything back into one mesh ────────────────────────────
-        if (isSeparated && meshCount > 1) {
-            listContainer?.addView(Button(ctx).apply {
-                text = "⊕  Combine All into One Mesh"
-                textSize = 12f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setTextColor(Color.parseColor("#4CAF82"))
-                background = ctx.getDrawable(R.drawable.bg_card_dark)
-                layoutParams = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT, 50
-                ).apply { setMargins(0, 16, 0, 4) }
-                setOnClickListener {
-                    val indices = IntArray(meshCount) { it }
-                    val glv = (activity as? MainActivity)?.glView ?: return@setOnClickListener
-                    glv.queueEvent {
-                        val ok = NativeLib.nativeCombineMeshes(indices)
-                        activity?.runOnUiThread {
-                            if (ok) {
-                                toast("✅ Combined $meshCount meshes into one")
-                                isSeparated = false
-                                refreshState(ctx)
-                                (activity as? MainActivity)?.updateStatusBar()
-                            } else {
-                                toast("Combine failed")
-                            }
-                        }
-                    }
-                }
             })
         }
     }
@@ -470,7 +215,7 @@ class MeshListFragment : BottomSheetDialogFragment() {
                         visibilityMap.remove(idx)
                         if (selectedIdx == idx) selectedIdx = -1
                         else if (selectedIdx > idx) selectedIdx--
-                        tvIslandTitle?.text = "$meshCount"
+                        tvCount?.text = "$meshCount"
                         if (isAdded) buildMeshList(ctx)
                         (activity as? MainActivity)?.updateStatusBar()
                     }

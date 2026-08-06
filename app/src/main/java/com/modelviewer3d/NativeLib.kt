@@ -20,14 +20,6 @@ object NativeLib {
     external fun nativeUploadParsed(): Boolean
     external fun nativeLoadModel(path: String): Boolean
 
-    // Mesh separation
-    external fun nativePerformSeparationCPU(): Boolean
-    external fun nativePerformSeparationGPU(): Boolean
-    external fun nativeIsSeparated(): Boolean
-    external fun nativeGetSeparationProgress(): Int
-    /** Islands smaller than [n] faces are dropped when separation completes. */
-    external fun nativeSetSeparationMinFaces(n: Int)
-
     // Camera
     external fun nativeTouchRotate(dx: Float, dy: Float)
     external fun nativeTouchZoom(factor: Float)

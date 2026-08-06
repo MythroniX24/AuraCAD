@@ -229,15 +229,6 @@ class MainActivity : AppCompatActivity() {
                 registerReceiver(selectionChangedReceiver, selFilter)
             }
 
-            // Register receiver for separation CPU-done signal
-            val sepFilter = IntentFilter(SeparationService.ACTION_SEPARATION_CPU_DONE)
-            if (Build.VERSION.SDK_INT >= 33) {
-                registerReceiver(separationCpuDoneReceiver, sepFilter, android.content.Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                @Suppress("UnspecifiedRegisterReceiverFlag")
-                registerReceiver(separationCpuDoneReceiver, sepFilter)
-            }
-
             // Back = background the app while a model is loading; the parse keeps
             // running on appScope and a notification fires on completion.
             onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -293,7 +284,6 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onPause()   { super.onPause();   glView.onPause()   }
     override fun onDestroy() {
-        try { unregisterReceiver(separationCpuDoneReceiver) } catch (_: Exception) {}
         try { unregisterReceiver(selectionChangedReceiver)  } catch (_: Exception) {}
         glView.queueEvent { NativeLib.nativeDestroy() }
         super.onDestroy()
@@ -428,24 +418,6 @@ class MainActivity : AppCompatActivity() {
         sendBroadcast(android.content.Intent(ACTION_SELECTED_MESH_CHANGED)
             .putExtra("idx", -1)
             .setPackage(packageName))
-    }
-
-    // ── Separation GPU upload ─────────────────────────────────────────────────
-    private val separationCpuDoneReceiver = object : BroadcastReceiver() {
-        override fun onReceive(ctx: android.content.Context, intent: android.content.Intent) {
-            if (intent.action != SeparationService.ACTION_SEPARATION_CPU_DONE) return
-            glView.queueEvent {
-                val ok = NativeLib.nativePerformSeparationGPU()
-                runOnUiThread {
-                    if (ok) {
-                        updateStatusBar()
-                        sendBroadcast(android.content.Intent(SeparationService.ACTION_SEPARATION_COMPLETE))
-                    } else {
-                        sendBroadcast(android.content.Intent(SeparationService.ACTION_SEPARATION_FAILED))
-                    }
-                }
-            }
-        }
     }
 
     // ── Status Bar ───────────────────────────────────────────────────────────

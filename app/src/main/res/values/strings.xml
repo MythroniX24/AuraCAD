@@ -3,7 +3,6 @@
     <string name="app_name">AuraCAD</string>
     <string name="open_model">Open 3D Model</string>
     <string name="edit_properties">Edit Properties</string>
-    <string name="mesh_separation">Mesh Separation</string>
     <string name="export_share">Export &amp; Share</string>
     <string name="undo">Undo</string>
     <string name="redo">Redo</string>
