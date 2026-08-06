@@ -18,10 +18,11 @@ import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
 import kotlinx.coroutines.launch
 
-/** Local, on-device storage for the Gemini API key. */
+/** Local, on-device storage for the Gemini API key + selected model. */
 object AiPrefs {
     private const val PREFS = "ai_prefs"
     private const val KEY_API = "gemini_api_key"
+    private const val KEY_MODEL = "gemini_model"
 
     fun apiKey(ctx: Context): String = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         .getString(KEY_API, "").orEmpty().let(GeminiClient::sanitizeApiKey)
@@ -29,6 +30,17 @@ object AiPrefs {
     fun saveApiKey(ctx: Context, key: String) {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .edit().putString(KEY_API, GeminiClient.sanitizeApiKey(key)).apply()
+    }
+
+    fun model(ctx: Context): String = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getString(KEY_MODEL, GeminiClient.DEFAULT_MODEL)
+        ?.takeIf { it in GeminiClient.MODELS }
+        ?: GeminiClient.DEFAULT_MODEL
+
+    fun saveModel(ctx: Context, model: String) {
+        if (model !in GeminiClient.MODELS) return
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .edit().putString(KEY_MODEL, model).apply()
     }
 }
 
@@ -67,6 +79,7 @@ class AiSettingsFragment : BottomSheetDialogFragment() {
 
         // ── Status card ───────────────────────────────────────────────────────
         val savedKey = AiPrefs.apiKey(ctx)
+        val currentModel = AiPrefs.model(ctx)
         val statusCard = UISheetKit.card(ctx, marginTopDp = 10).apply {
             addView(UISheetKit.cardTitle(ctx, "STATUS", "#4CAF82"))
             addView(TextView(ctx).apply {
@@ -77,6 +90,9 @@ class AiSettingsFragment : BottomSheetDialogFragment() {
                 setTypeface(null, android.graphics.Typeface.BOLD)
                 setTextColor(Color.parseColor(if (savedKey.isBlank()) "#FFC46B" else "#4CAF82"))
             })
+            addView(UISheetKit.subText(ctx,
+                "Model: $currentModel  (auto-fallback if retired)",
+                "#7A8BA3", 10f).also { tvModelLine = it })
         }
         root.addView(statusCard)
 
@@ -126,6 +142,24 @@ class AiSettingsFragment : BottomSheetDialogFragment() {
         }
         root.addView(inputCard)
 
+        // ── Model picker card ─────────────────────────────────────────────────
+        root.addView(UISheetKit.sectionLabel(ctx, "MODEL", "#A78BFA"))
+        val modelCard = UISheetKit.card(ctx, marginTopDp = 0).apply {
+            addView(UISheetKit.cardTitle(ctx, "WHICH MODEL", "#A78BFA"))
+            addView(UISheetKit.subText(ctx,
+                "Gemini 2.5-flash was retired for new users — AuraCAD now uses the " +
+                "newest available model and falls back automatically if one is retired.",
+                "#7A8BA3", 10f))
+            val chipRow = LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                setPadding(0, UISheetKit.dp(ctx, 8), 0, 0)
+            }
+            buildModelChips(ctx, chipRow)
+            addView(chipRow)
+        }
+        root.addView(modelCard)
+
         // ── Action buttons ────────────────────────────────────────────────────
         root.addView(UISheetKit.primaryButton(ctx, "💾  Save Key").apply {
             setOnClickListener { saveKey() }
@@ -149,7 +183,8 @@ class AiSettingsFragment : BottomSheetDialogFragment() {
         root.addView(UISheetKit.infoText(ctx,
             "Get a free key: aistudio.google.com/apikey\n" +
             "The key is cleaned automatically when pasted (spaces, quotes, " +
-            "\"GEMINI_API_KEY=\" prefixes are removed).",
+            "\"GEMINI_API_KEY=\" prefixes are removed).\n" +
+            "Model 404/\"not available\" errors auto-switch to the next model.",
             "#5A6B85", 9f))
 
         return scroll
@@ -160,6 +195,39 @@ class AiSettingsFragment : BottomSheetDialogFragment() {
     private var btnTest: Button? = null
     private var tvFeedback: TextView? = null
     private var keyVisible = false
+    private var tvModelLine: TextView? = null
+
+    /** Builds (or rebuilds) the model chip row. Each chip is clickable. */
+    private fun buildModelChips(ctx: Context, row: LinearLayout) {
+        row.removeAllViews()
+        val sel = AiPrefs.model(ctx)
+        GeminiClient.MODELS.forEachIndexed { i, m ->
+            val on = m == sel
+            row.addView(Button(ctx).apply {
+                text = m.replace("gemini-", "").uppercase()
+                textSize = 9f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(Color.parseColor(if (on) "#0B1320" else "#A9B8CC"))
+                background = ctx.getDrawable(
+                    if (on) R.drawable.bg_btn_accent else R.drawable.bg_card_dark)
+                layoutParams = LinearLayout.LayoutParams(0,
+                    UISheetKit.dp(ctx, 40), 1f).apply {
+                    setMargins(0, 0,
+                        if (i < GeminiClient.MODELS.size - 1) UISheetKit.dp(ctx, 6) else 0, 0)
+                }
+                setOnClickListener {
+                    AiPrefs.saveModel(ctx, m)
+                    setFeedback("✓ Model set to $m", "#4CAF82")
+                    buildModelChips(ctx, row)   // re-render so the active chip highlights
+                    refreshModelLine()
+                }
+            })
+        }
+    }
+
+    private fun refreshModelLine() {
+        tvModelLine?.text = "Model: ${AiPrefs.model(requireContext())}  (auto-fallback if retired)"
+    }
 
     private fun pasteFromClipboard() {
         val cm = requireContext().getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -212,11 +280,13 @@ class AiSettingsFragment : BottomSheetDialogFragment() {
                 val reply = GeminiClient.generate(
                     key,
                     "Return only valid JSON with a boolean ok field.",
-                    "Return exactly: {\"ok\":true}"
+                    "Return exactly: {\"ok\":true}",
+                    model = AiPrefs.model(ctx)
                 )
-                val connected = parseConnectionReply(reply)
+                val connected = parseConnectionReply(reply.text)
                 setFeedback(
-                    if (connected) "✓ Connected · Gemini is ready" else "✕ Gemini replied with an unexpected response",
+                    if (connected) "✓ Connected · ${reply.model} is ready"
+                    else "✕ ${reply.model} replied with an unexpected response",
                     if (connected) "#4CAF82" else "#FF7A72")
             } catch (e: GeminiClient.GeminiException) {
                 setFeedback("✕ ${e.message}", "#FF7A72")
