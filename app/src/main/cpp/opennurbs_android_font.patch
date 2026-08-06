@@ -1,0 +1,26 @@
+diff --git a/opennurbs_freetype.cpp b/opennurbs_freetype.cpp
+index 212ced5..1a308b6 100644
+--- a/opennurbs_freetype.cpp
++++ b/opennurbs_freetype.cpp
+@@ -1442,6 +1442,7 @@ ON_FreeTypeFace* ON_FreeType::Internal_CreateFaceFromAppleFont (CTFontRef fontRe
+ #endif    // ON_RUNTIME_APPLE
+ 
+ #if defined(ON_RUNTIME_ANDROID)
++#if defined(__ANDROID_API__) && __ANDROID_API__ >= 29
+ ON_FreeTypeFace* ON_FreeType::Internal_CreateFaceWithAndroidNdk(const ON_Font& font)
+ {
+   AFontMatcher* ndkFontMatcher = AFontMatcher_create();
+@@ -1467,6 +1468,13 @@ ON_FreeTypeFace* ON_FreeType::Internal_CreateFaceWithAndroidNdk(const ON_Font& f
+   AFontMatcher_destroy(ndkFontMatcher);
+   return rc;
+ }
++#else
++ON_FreeTypeFace* ON_FreeType::Internal_CreateFaceWithAndroidNdk(const ON_Font& font)
++{
++  // Android < API 29: the NDK font APIs (AFontMatcher_*) do not exist - stub.
++  return nullptr;
++}
++#endif
+ 
+ #endif
+ 

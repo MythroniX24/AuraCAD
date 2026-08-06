@@ -29,6 +29,11 @@ FetchContent_Declare(
     GIT_REPOSITORY https://github.com/mcneel/openNURBS.git
     GIT_TAG        v8.9.24194.18121
     GIT_SHALLOW    TRUE
+    # opennurbs_freetype.cpp calls the Android NDK font APIs (AFontMatcher_*)
+    # which only exist since API 29. We build with ANDROID_PLATFORM=android-24,
+    # so the patch guards that code with __ANDROID_API__ >= 29 and stubs it
+    # otherwise (font faces aren't needed by this app).
+    PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/opennurbs_android_font.patch
 )
 
 FetchContent_MakeAvailable(tinyobjloader tinygltf opennurbs)
