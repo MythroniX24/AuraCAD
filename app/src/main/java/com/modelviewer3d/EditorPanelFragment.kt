@@ -7,6 +7,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -129,6 +130,61 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
         // ── TRANSFORM ─────────────────────────────────────────────────────────
         sliderRefs.clear()
         transformCard.addView(UISheetKit.cardTitle(ctx, "TRANSFORM", "#4DD8FF"))
+
+        // ── SET SIZE (mm) — fully connected to nativeSetScaleMM: typing exact
+        //    W×H×D in millimetres rescales the whole model so ruler, exports and
+        //    mesh info all report the new size. ───────────────────────────────
+        transformCard.addView(UISheetKit.cardTitle(ctx, "SET SIZE (mm)", "#4CAF82"))
+        transformCard.addView(UISheetKit.subText(ctx,
+            "Enter the exact model size in millimetres — ruler, export and stats all follow.",
+            "#7A8BA3", 10f))
+        val etW = UISheetKit.inputField(ctx, "Width mm", numeric = true)
+        val etH = UISheetKit.inputField(ctx, "Height mm", numeric = true)
+        val etD = UISheetKit.inputField(ctx, "Depth mm", numeric = true)
+        transformCard.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, UISheetKit.dp(ctx, 8), 0, 0)
+            listOf(etW, etH, etD).forEachIndexed { i, et ->
+                addView(et.apply {
+                    layoutParams = LinearLayout.LayoutParams(0,
+                        UISheetKit.dp(ctx, 46), 1f).apply {
+                        setMargins(0, 0, if (i < 2) UISheetKit.dp(ctx, 6) else 0, 0)
+                    }
+                })
+            }
+        })
+        transformCard.addView(LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            setPadding(0, UISheetKit.dp(ctx, 8), 0, 0)
+            addView(UISheetKit.secondaryButton(ctx, "↺  Original", "#FFC46B", 42).apply {
+                layoutParams = LinearLayout.LayoutParams(0,
+                    UISheetKit.dp(ctx, 42), 1f).apply {
+                    setMargins(0, 0, UISheetKit.dp(ctx, 6), 0)
+                }
+                setOnClickListener {
+                    glRun {
+                        NativeLib.nativePushUndoState()
+                        NativeLib.nativeSetScaleMM(origW, origH, origD)
+                        activity?.runOnUiThread {
+                            etW.setText("%.2f".format(origW))
+                            etH.setText("%.2f".format(origH))
+                            etD.setText("%.2f".format(origD))
+                            refreshDimsText()
+                            notifyDimsChanged()
+                        }
+                    }
+                }
+            })
+            addView(UISheetKit.primaryButton(ctx, "✓  Apply Size", 42).apply {
+                layoutParams = LinearLayout.LayoutParams(0,
+                    UISheetKit.dp(ctx, 42), 1f).apply {
+                    setMargins(UISheetKit.dp(ctx, 6), 0, 0, 0)
+                }
+                setOnClickListener { applyMmSize(etW, etH, etD) }
+            })
+        })
         transformCard.addView(axisRow(ctx, "Position  X", -2f, 2f, 0f, "#FFC46B") { v ->
             posX = v; pushAndSet { NativeLib.nativeSetTranslation(posX, posY, posZ) }
         })
@@ -248,20 +304,64 @@ class EditorPanelFragment : BottomSheetDialogFragment() {
             Tab.LIGHTING to lightingCard
         )
 
-        // Async dimension load
+        // Async dimension load — prefill the mm fields with the CURRENT size
         (activity as? MainActivity)?.glView?.queueEvent {
             try {
                 val s = NativeLib.nativeGetModelSizeMM()
+                // nativeGetModelSizeMM returns [origW,origH,origD, curW,curH,curD]
                 val ow = s[0]; val oh = s[1]; val od = s[2]
+                val cw = s[3]; val ch = s[4]; val cd = s[5]
                 activity?.runOnUiThread {
                     origW = ow; origH = oh; origD = od
-                    tvDims?.text = "Current  %.1f × %.1f × %.1f mm".format(ow, oh, od)
+                    tvDims?.text = "Current  %.1f × %.1f × %.1f mm".format(cw, ch, cd)
                     tvOrigDims?.text = "Original %.1f × %.1f × %.1f mm".format(ow, oh, od)
+                    etW.setText("%.2f".format(cw))
+                    etH.setText("%.2f".format(ch))
+                    etD.setText("%.2f".format(cd))
                 }
             } catch (_: Exception) {}
         }
 
         return scroll
+    }
+
+    /** Applies the typed W×H×D (mm) to the whole model via nativeSetScaleMM. */
+    private fun applyMmSize(etW: EditText, etH: EditText, etD: EditText) {
+        val w = etW.text.toString().toFloatOrNull()
+        val h = etH.text.toString().toFloatOrNull()
+        val d = etD.text.toString().toFloatOrNull()
+        if (w == null || h == null || d == null || w <= 0f || h <= 0f || d <= 0f) {
+            (activity as? MainActivity)?.toast("Enter valid positive sizes in mm")
+            return
+        }
+        glRun {
+            NativeLib.nativePushUndoState()
+            NativeLib.nativeSetScaleMM(w, h, d)
+            activity?.runOnUiThread {
+                refreshDimsText()
+                notifyDimsChanged()
+            }
+        }
+    }
+
+    /** Re-reads current/original size and refreshes the summary + mm fields. */
+    private fun refreshDimsText() {
+        (activity as? MainActivity)?.glView?.queueEvent {
+            try {
+                val s = NativeLib.nativeGetModelSizeMM()
+                val cw = s[3]; val ch = s[4]; val cd = s[5]
+                activity?.runOnUiThread {
+                    tvDims?.text = "Current  %.1f × %.1f × %.1f mm".format(cw, ch, cd)
+                    tvOrigDims?.text = "Original %.1f × %.1f × %.1f mm".format(s[0], s[1], s[2])
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    /** Lets every open tool (ruler, ring, mesh list) re-read the new size. */
+    private fun notifyDimsChanged() {
+        requireActivity().sendBroadcast(
+            android.content.Intent(ACTION_DIMS_CHANGED).setPackage(requireActivity().packageName))
     }
 
     private var tabContent: Map<Tab, LinearLayout>? = null

@@ -15,6 +15,13 @@ class ModelGLSurfaceView @JvmOverloads constructor(
 
     enum class Mode { CAMERA, RULER }
     var mode: Mode = Mode.CAMERA
+    /**
+     * Active transform gizmo tool: 0 = none, 1 = move, 2 = rotate, 3 = scale.
+     * When non-zero, one-finger drags edit the model instead of orbiting the
+     * camera (the gizmo is drawn by the native renderer).  Two-finger pan and
+     * pinch zoom still control the camera.
+     */
+    var gizmoTool: Int = 0
     var onRulerPick: ((FloatArray) -> Unit)? = null
     /**
      * Long-press selection callback. Fires on the UI thread with the picked
@@ -27,6 +34,9 @@ class ModelGLSurfaceView @JvmOverloads constructor(
     private var lastMidX = 0f; private var lastMidY = 0f
     // Track whether scale gesture is actively running
     private var isScaling = false
+    // Gizmo undo snapshot pushed only once the first real drag starts (so a
+    // plain tap doesn't pollute the undo stack)
+    private var gizmoUndoPushed = false
 
     private val scaleDetector = ScaleGestureDetector(context,
         object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -117,6 +127,7 @@ class ModelGLSurfaceView @JvmOverloads constructor(
             MotionEvent.ACTION_DOWN -> {
                 lastX = event.x; lastY = event.y
                 isScaling = false
+                gizmoUndoPushed = false
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -130,8 +141,17 @@ class ModelGLSurfaceView @JvmOverloads constructor(
                 count == 1 && !isScaling -> {
                     val dx = event.x - lastX
                     val dy = event.y - lastY
-                    if (abs(dx) > 0.4f || abs(dy) > 0.4f)
-                        queueEvent { NativeLib.nativeTouchRotate(dx, dy) }
+                    if (abs(dx) > 0.4f || abs(dy) > 0.4f) {
+                        if (gizmoTool != 0) {
+                            if (!gizmoUndoPushed) {
+                                gizmoUndoPushed = true
+                                queueEvent { NativeLib.nativeGizmoDrag(0f, 0f, true) } // one undo per gesture
+                            }
+                            queueEvent { NativeLib.nativeGizmoDrag(dx, dy, false) }
+                        } else {
+                            queueEvent { NativeLib.nativeTouchRotate(dx, dy) }
+                        }
+                    }
                     lastX = event.x; lastY = event.y
                 }
                 // 2-finger pan — only when NOT scaling (zoom has priority)
@@ -155,6 +175,7 @@ class ModelGLSurfaceView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isScaling = false
+                gizmoUndoPushed = false
             }
         }
         return true

@@ -308,8 +308,9 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 4, 3, if (rulerActive) "Disable Ruler" else "Ruler")
         popup.menu.add(0, 5, 4, "Screenshot")
         popup.menu.add(0, 6, 5, "Export…")
-        popup.menu.add(0, 7, 6, "✨ AI Assistant")
-        popup.menu.add(0, 8, 7, "🔋 Battery Optimization")
+        popup.menu.add(0, 7, 6, "🛠 Transform Panel")
+        popup.menu.add(0, 8, 7, "✨ AI Assistant")
+        popup.menu.add(0, 9, 8, "🔋 Battery Optimization")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> findViewById<View>(R.id.btnOpen).performClick()
@@ -318,8 +319,9 @@ class MainActivity : AppCompatActivity() {
                 4 -> btnRuler?.performClick()
                 5 -> findViewById<View>(R.id.btnScreenshot).performClick()
                 6 -> findViewById<View>(R.id.btnExport).performClick()
-                7 -> openAiSettings()
-                8 -> requestBatteryOptimizationExemption()
+                7 -> openMeshTools()
+                8 -> openAiSettings()
+                9 -> requestBatteryOptimizationExemption()
             }
             true
         }
@@ -340,19 +342,33 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             Tool.MOVE, Tool.ROTATE, Tool.SCALE -> {
-                if (selectedMeshIdx < 0) {
-                    toast("Long-press a mesh on the canvas first, then choose a transform")
-                    activeTool = Tool.NONE
-                    updateToolButtons()
-                } else {
-                    findViewById<View>(R.id.btnMeshTools).performClick()
+                // 3D gizmo on the preview: rotate/move/scale tools manipulate the
+                // model directly via the on-canvas axis gizmo (drag to edit).
+                val gizmoMode = when (newTool) {
+                    Tool.MOVE   -> 1
+                    Tool.ROTATE -> 2
+                    else        -> 3
                 }
+                glView.gizmoTool = gizmoMode
+                glView.queueEvent { NativeLib.nativeSetGizmoMode(gizmoMode) }
+                toast("Drag on the canvas to ${toolHint(newTool)} the model")
             }
             Tool.RING -> {
+                glView.gizmoTool = 0
+                glView.queueEvent { NativeLib.nativeSetGizmoMode(0) }
                 findViewById<View>(R.id.btnRingTool).performClick()
             }
-            Tool.NONE -> { /* deactivated */ }
+            Tool.NONE -> {
+                glView.gizmoTool = 0
+                glView.queueEvent { NativeLib.nativeSetGizmoMode(0) }
+            }
         }
+    }
+
+    private fun toolHint(tool: Tool): String = when (tool) {
+        Tool.MOVE   -> "move"
+        Tool.ROTATE -> "rotate"
+        else        -> "scale"
     }
 
     private fun updateToolButtons() {

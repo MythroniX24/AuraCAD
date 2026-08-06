@@ -128,6 +128,17 @@ public:
     void touchPan(float dx, float dy);
     void resetCamera();
 
+    // ── Transform gizmo ───────────────────────────────────────────────────────
+    // 0 = off, 1 = move, 2 = rotate, 3 = scale.  When on, a 3D axis manipulator
+    // is drawn at the model centre and one-finger drags edit the GLOBAL model
+    // transform instead of the camera.  Call on the GL thread.
+    void setGizmoMode(int mode);
+    int  getGizmoMode() const { return m_gizmoMode; }
+    /** start=true pushes ONE undo snapshot (call once per gesture); then stream
+     *  dx/dy deltas with start=false.  Applies move / rotate / scale on the
+     *  global transform according to m_gizmoMode. */
+    void gizmoDrag(float dx, float dy, bool start);
+
     // Global transform
     void setRotation(float x,float y,float z);
     void setTranslation(float x,float y,float z);
@@ -239,6 +250,15 @@ private:
     GLuint m_bbVao=0, m_bbVbo=0, m_bbIbo=0;
     GLuint m_rulerVao=0, m_rulerVbo=0;
     GLsizei m_bbIndexCount=0;
+
+    // Transform gizmo GL state + geometry
+    int    m_gizmoMode = 0;
+    GLuint m_gizVao=0, m_gizVbo=0;
+    GLsizei m_gizVertCount=0;         // total verts in the gizmo buffer
+    int    m_gizAxisOffset[3] = {0,0,0};
+    int    m_gizAxisCount[3]  = {0,0,0};
+    void   buildGizmoGeometry();      // rebuilds vertex buffer for m_gizmoMode
+    void   drawGizmo(const Mat4& proj, const Mat4& view);
 
     // Cached uniform locations — avoids glGetUniformLocation every frame
     struct UniformLocs {

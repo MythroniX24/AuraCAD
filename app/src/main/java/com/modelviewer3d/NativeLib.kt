@@ -34,6 +34,13 @@ object NativeLib {
     external fun nativeTouchPan(dx: Float, dy: Float)
     external fun nativeResetCamera()
 
+    // ── Transform gizmo ──────────────────────────────────────────────────────
+    /** 0 = off, 1 = move, 2 = rotate, 3 = scale. Shows the 3D axis manipulator. */
+    external fun nativeSetGizmoMode(mode: Int)
+    external fun nativeGetGizmoMode(): Int
+    /** One-finger drag while a gizmo tool is active. start=true pushes one undo. */
+    external fun nativeGizmoDrag(dx: Float, dy: Float, start: Boolean)
+
     // Global transform
     external fun nativeSetRotation(x: Float, y: Float, z: Float)
     external fun nativeSetTranslation(x: Float, y: Float, z: Float)

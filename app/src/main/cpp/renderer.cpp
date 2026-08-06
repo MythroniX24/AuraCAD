@@ -127,6 +127,8 @@ Renderer::~Renderer(){
     if(m_bbIbo)    glDeleteBuffers(1,&m_bbIbo);
     if(m_rulerVao) glDeleteVertexArrays(1,&m_rulerVao);
     if(m_rulerVbo) glDeleteBuffers(1,&m_rulerVbo);
+    if(m_gizVao)   glDeleteVertexArrays(1,&m_gizVao);
+    if(m_gizVbo)   glDeleteBuffers(1,&m_gizVbo);
     if(m_mainProg) glDeleteProgram(m_mainProg);
     if(m_wireProg) glDeleteProgram(m_wireProg);
 }
@@ -160,6 +162,158 @@ bool Renderer::init(int w,int h){
 }
 
 void Renderer::resize(int w,int h){ m_width=w; m_height=h; glViewport(0,0,w,h); }
+
+// ── Transform gizmo ───────────────────────────────────────────────────────────
+void Renderer::setGizmoMode(int mode){
+    if(mode<0||mode>3) mode=0;
+    if(mode==m_gizmoMode) return;
+    m_gizmoMode=mode;
+    if(m_gizmoMode!=0) buildGizmoGeometry();
+}
+
+// Rebuilds the gizmo vertex buffer for the current mode.  Geometry is grouped
+// per axis (X,Y,Z) so each axis can be drawn with its own colour.
+void Renderer::buildGizmoGeometry(){
+    if(!m_gizVao){ glGenVertexArrays(1,&m_gizVao); glGenBuffers(1,&m_gizVbo); }
+    std::vector<float> v; // xyz triplets
+    auto line=[&](float ax,float ay,float az,float bx,float by,float bz){
+        v.push_back(ax);v.push_back(ay);v.push_back(az);
+        v.push_back(bx);v.push_back(by);v.push_back(bz);
+    };
+    int base=0;
+    for(int axis=0;axis<3;++axis){
+        m_gizAxisOffset[axis]=base;
+        float dx=0,dy=0,dz=0;
+        if(axis==0) dx=1; else if(axis==1) dy=1; else dz=1;
+        if(m_gizmoMode==1){ // MOVE: shaft + arrowhead cone
+            line(0,0,0, dx,dy,dz);
+            float hx=dx*0.7f,hy=dy*0.7f,hz=dz*0.7f;
+            float p1x=0,p1y=0,p1z=0,p2x=0,p2y=0,p2z=0;
+            if(axis==0){ p1y=0.12f; p2z=0.12f; }
+            else if(axis==1){ p1x=0.12f; p2z=0.12f; }
+            else { p1x=0.12f; p2y=0.12f; }
+            line(hx+p1x,hy+p1y,hz+p1z, dx,dy,dz);
+            line(hx-p1x,hy-p1y,hz-p1z, dx,dy,dz);
+            line(hx+p2x,hy+p2y,hz+p2z, dx,dy,dz);
+            line(hx-p2x,hy-p2y,hz-p2z, dx,dy,dz);
+        } else if(m_gizmoMode==2){ // ROTATE: ring around the axis
+            const int seg=32;
+            float ux=0,uy=0,uz=0,vx=0,vy=0,vz=0;
+            if(axis==0){ ux=0;uy=1;uz=0; vx=0;vy=0;vz=1; }
+            else if(axis==1){ ux=1;uy=0;uz=0; vx=0;vy=0;vz=1; }
+            else { ux=1;uy=0;uz=0; vx=0;vy=1;vz=0; }
+            for(int i=0;i<seg;++i){
+                float t0=(float)i/seg*2.f*PI;
+                float t1=(float)(i+1)/seg*2.f*PI;
+                float c0=cosf(t0),s0=sinf(t0),c1=cosf(t1),s1=sinf(t1);
+                line(c0*ux*0.95f+s0*vx*0.95f,c0*uy*0.95f+s0*vy*0.95f,c0*uz*0.95f+s0*vz*0.95f,
+                     c1*ux*0.95f+s1*vx*0.95f,c1*uy*0.95f+s1*vy*0.95f,c1*uz*0.95f+s1*vz*0.95f);
+            }
+        } else if(m_gizmoMode==3){ // SCALE: shaft + wire cube at tip
+            line(0,0,0, dx,dy,dz);
+            float ux=0,uy=0,uz=0,vx=0,vy=0,vz=0;
+            if(axis==0){ ux=0;uy=1;uz=0; vx=0;vy=0;vz=1; }
+            else if(axis==1){ ux=1;uy=0;uz=0; vx=0;vy=0;vz=1; }
+            else { ux=1;uy=0;uz=0; vx=0;vy=1;vz=0; }
+            const float h=0.09f;
+            float corners[8][3];
+            int idx=0;
+            for(int i=0;i<2;++i) for(int j=0;j<2;++j) for(int k=0;k<2;++k){
+                corners[idx][0]=dx+(i?1.f:-1.f)*ux*h+(j?1.f:-1.f)*vx*h;
+                corners[idx][1]=dy+(i?1.f:-1.f)*uy*h+(j?1.f:-1.f)*vy*h;
+                corners[idx][2]=dz+(i?1.f:-1.f)*uz*h+(j?1.f:-1.f)*vz*h;
+                idx++;
+            }
+            const int edges[12][2]={{0,1},{0,2},{1,3},{2,3},{4,5},{4,6},{5,7},{6,7},{0,4},{1,5},{2,6},{3,7}};
+            for(auto& e:edges)
+                line(corners[e[0]][0],corners[e[0]][1],corners[e[0]][2],
+                     corners[e[1]][0],corners[e[1]][1],corners[e[1]][2]);
+        }
+        m_gizAxisCount[axis]=(int)(v.size()/3)-base;
+        base=(int)(v.size()/3);
+    }
+    m_gizVertCount=(GLsizei)(v.size()/3);
+    glBindVertexArray(m_gizVao);
+    glBindBuffer(GL_ARRAY_BUFFER,m_gizVbo);
+    glBufferData(GL_ARRAY_BUFFER,(GLsizeiptr)(v.size()*sizeof(float)),
+                 v.empty()?nullptr:v.data(),GL_STATIC_DRAW);
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0,3,GL_FLOAT,GL_FALSE,12,nullptr);
+    glBindVertexArray(0);
+}
+
+void Renderer::drawGizmo(const Mat4& proj,const Mat4& view){
+    if(m_gizmoMode<=0||m_gizVertCount<=0||!m_gizVao) return;
+    // Anchor at the world-space centre of the visible meshes
+    float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX,mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
+    Mat4 global=buildGlobalMatrix();
+    for(const auto& mo:m_meshes){
+        if(!mo.visible) continue;
+        Mat4 model=global*buildMeshMatrix(mo);
+        for(const auto& v:mo.vertices){
+            float px=model.m[0]*v.px+model.m[4]*v.py+model.m[8]*v.pz+model.m[12];
+            float py=model.m[1]*v.px+model.m[5]*v.py+model.m[9]*v.pz+model.m[13];
+            float pz=model.m[2]*v.px+model.m[6]*v.py+model.m[10]*v.pz+model.m[14];
+            mnX=std::min(mnX,px);mxX=std::max(mxX,px);
+            mnY=std::min(mnY,py);mxY=std::max(mxY,py);
+            mnZ=std::min(mnZ,pz);mxZ=std::max(mxZ,pz);
+        }
+    }
+    if(mxX<=mnX) return;
+    float cx=0.5f*(mnX+mxX), cy=0.5f*(mnY+mxY), cz=0.5f*(mnZ+mxZ);
+    float size=std::max(mxX-mnX,std::max(mxY-mnY,mxZ-mnZ));
+    if(size<1e-4f) size=1.0f;
+    size*=0.55f;
+    Mat4 giz=Mat4::translation(cx,cy,cz)*Mat4::scale(size,size,size);
+    Mat4 mvp=proj*view*giz;
+    glUseProgram(m_wireProg);
+    glUniformMatrix4fv(m_uloc.wireMvp,1,GL_FALSE,mvp.m);
+    glUniform1f(m_uloc.wirePointSize,1.0f);
+    glDisable(GL_DEPTH_TEST);
+    glLineWidth(2.5f);
+    glBindVertexArray(m_gizVao);
+    static const float kCols[3][3]={{1.0f,0.25f,0.25f},{0.25f,1.0f,0.3f},{0.3f,0.6f,1.0f}};
+    for(int a=0;a<3;++a){
+        if(m_gizAxisCount[a]<=0) continue;
+        glUniform4f(m_uloc.wireColor,kCols[a][0],kCols[a][1],kCols[a][2],1.0f);
+        glDrawArrays(GL_LINES,m_gizAxisOffset[a],m_gizAxisCount[a]);
+    }
+    glBindVertexArray(0);
+    glEnable(GL_DEPTH_TEST);
+    glLineWidth(1.0f);
+}
+
+// One-finger drag while a gizmo tool is active.  start=true = push one undo
+// snapshot and return; subsequent calls stream deltas on the GLOBAL transform.
+void Renderer::gizmoDrag(float dx,float dy,bool start){
+    if(m_gizmoMode<=0) return;
+    if(start){ pushUndoState(); return; }
+    const float k = 2.0f*m_camDist/(float)std::max(m_height,1);
+    if(m_gizmoMode==1){ // MOVE — translate in the camera's right/up plane
+        float cp=cosf(m_camPitch),sp=sinf(m_camPitch);
+        float cy=cosf(m_camYaw), sy=sinf(m_camYaw);
+        Vec3 fwd{cp*sy,sp,cp*cy};
+        Vec3 up{0,1,0};
+        Vec3 right=fwd.cross(up).normalized();
+        Vec3 upw=up - fwd*up.dot(fwd);
+        upw=upw.normalized();
+        Vec3 d = right*(dx*k) - upw*(dy*k);
+        m_posX+=d.x; m_posY+=d.y; m_posZ+=d.z;
+    } else if(m_gizmoMode==2){ // ROTATE — yaw around world Y, pitch around view axis
+        m_rotY+=dx*0.4f;
+        m_rotX-=dy*0.4f;
+        m_rotX=std::fmodf(m_rotX+180.f,360.f); if(m_rotX<0) m_rotX+=360.f; m_rotX-=180.f;
+        m_rotY=std::fmodf(m_rotY+180.f,360.f); if(m_rotY<0) m_rotY+=360.f; m_rotY-=180.f;
+    } else if(m_gizmoMode==3){ // SCALE — uniform by vertical drag
+        float f=1.0f+dy*0.01f;
+        if(f<0.95f) f=0.95f;
+        if(f>1.05f) f=1.05f;
+        m_scaX*=f; m_scaY*=f; m_scaZ*=f;
+        float m=std::max(std::fabsf(m_scaX),std::max(std::fabsf(m_scaY),std::fabsf(m_scaZ)));
+        if(m>8.0f){ float r=8.0f/m; m_scaX*=r;m_scaY*=r;m_scaZ*=r; }
+        if(m<0.02f){ float r=0.02f/m; m_scaX*=r;m_scaY*=r;m_scaZ*=r; }
+    }
+}
 
 void Renderer::buildShaders(){
     if(m_mainProg) glDeleteProgram(m_mainProg);
@@ -415,6 +569,9 @@ void Renderer::draw(){
         glBindVertexArray(0);
     }
 
+    // Transform gizmo overlay (on top, depth-test off)
+    drawGizmo(proj, view);
+
     // Ruler
     if(m_rulerHasP1||m_rulerHasP2){
         Mat4 vp=proj*view;
@@ -622,6 +779,8 @@ void Renderer::onContextLost(){
     // Bounding-box and ruler GL objects also invalid
     m_bbVao = m_bbVbo = m_bbIbo = 0;
     m_rulerVao = m_rulerVbo = 0;
+    m_gizVao = m_gizVbo = 0;
+    m_gizVertCount = 0;
     m_mainProg = m_wireProg = 0;
 }
 
@@ -636,6 +795,7 @@ void Renderer::rebuildContext(){
     for(auto& mo : m_meshes){
         if(!mo.gpuReady) uploadMeshObject(mo);
     }
+    if(m_gizmoMode!=0) buildGizmoGeometry();
     LOGI("rebuildContext: re-uploaded %zu meshes", m_meshes.size());
 }
 

@@ -138,6 +138,22 @@ JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeResetCamera(JNIEnv
     LOCK_OR_VOID(); g_renderer->resetCamera();
 }
 
+// ── Transform gizmo ──────────────────────────────────────────────────────────
+// 0 = off, 1 = move, 2 = rotate, 3 = scale.  When on, a 3D axis manipulator is
+// drawn at the model centre and one-finger drags edit the model transform.
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetGizmoMode(JNIEnv*,jclass,jint mode){
+    LOCK_OR_VOID(); g_renderer->setGizmoMode((int)mode);
+}
+JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeGetGizmoMode(JNIEnv*,jclass){
+    LOCK_RENDERER();
+    if(!g_renderer) return 0;
+    return (jint)g_renderer->getGizmoMode();
+}
+// start=true pushes ONE undo snapshot; then stream dx/dy deltas with start=false.
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDrag(JNIEnv*,jclass,jfloat dx,jfloat dy,jboolean start){
+    LOCK_OR_VOID(); g_renderer->gizmoDrag((float)dx,(float)dy,start==JNI_TRUE);
+}
+
 // ── Transform ────────────────────────────────────────────────────────────────
 // IMPORTANT: setRotation/setTranslation/setScaleMM no longer push undo state
 // internally.  Continuous slider drags used to flood the undo stack with one
