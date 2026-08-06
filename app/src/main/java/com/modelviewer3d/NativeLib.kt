@@ -135,7 +135,12 @@ object NativeLib {
     external fun nativeGetMMPerUnit(): Float
     external fun nativeCombineMeshes(indices: IntArray): Boolean
 
-    // Rhino 3DM (openNURBS)
+    // ── Export (all supported formats) ──────────────────────────────────────
+    external fun nativeExportOBJ(path: String): Boolean
+    external fun nativeExportSTL(path: String): Boolean
+    external fun nativeExportPLY(path: String): Boolean
+    external fun nativeExportGLB(path: String): Boolean
+    external fun nativeExport3DS(path: String): Boolean
     external fun nativeExport3DM(path: String): Boolean
 
     // ── Brush Tools ───────────────────────────────────────────────────────────

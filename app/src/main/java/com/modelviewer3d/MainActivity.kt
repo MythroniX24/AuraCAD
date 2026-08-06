@@ -295,7 +295,7 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 4, 3, "⬡ Mesh Separation")
         popup.menu.add(0, 5, 4, if (rulerActive) "Disable Ruler" else "Ruler")
         popup.menu.add(0, 6, 5, "Screenshot")
-        popup.menu.add(0, 7, 6, "💾 Export 3DM…")
+        popup.menu.add(0, 7, 6, "💾 Export…")
         popup.menu.add(0, 8, 7, "🛠 Transform Panel")
         popup.menu.add(0, 9, 8, "✨ AI Assistant")
         popup.menu.add(0, 10, 9, "🔋 Battery Optimization")
@@ -307,7 +307,7 @@ class MainActivity : AppCompatActivity() {
                 4 -> openSeparation()
                 5 -> btnRuler?.performClick()
                 6 -> findViewById<View>(R.id.btnScreenshot).performClick()
-                7 -> export3DM()
+                7 -> openExport()
                 8 -> openMeshTools()
                 9 -> openAiSettings()
                 10 -> requestBatteryOptimizationExemption()
@@ -562,10 +562,16 @@ class MainActivity : AppCompatActivity() {
         if (rulerActive) tvRulerInfo?.text = "Tap mesh surface — Point 1"
     }
 
-    // ── Export 3DM (openNURBS) ────────────────────────────────────────────────
-    // Writes the current model as a Rhino .3dm (v6, millimetres). Saves to
-    // Downloads/AuraCAD/ on Android 10+ via MediaStore, app storage otherwise.
-    private fun export3DM() {
+    // ── Export (all supported formats) ────────────────────────────────────────
+    // Writes the current model in the requested format to Downloads/AuraCAD
+    // (MediaStore on Android 10+, app storage otherwise) and optionally opens
+    // the system share sheet. Every exported unit = 1 mm, so files stay
+    // correctly sized in every format.
+    fun exportModel(formatId: String, share: Boolean) {
+        val info = exportInfo(formatId) ?: run {
+            toast("Unknown format $formatId"); return
+        }
+        val (label, ext, mime) = info
         lifecycleScope.launch(Dispatchers.IO) {
             try {
                 if (currentFileName.isEmpty()) {
@@ -574,25 +580,26 @@ class MainActivity : AppCompatActivity() {
                 }
                 val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
                 val base = currentFileName.substringBeforeLast('.', "model")
-                val name = "${base}_$ts.3dm"
+                val name = "${base}_$ts.$ext"
 
                 val cacheFile = File(cacheDir, name)
                 var ok = false
                 val latch = CountDownLatch(1)
                 glView.queueEvent {
-                    try { ok = NativeLib.nativeExport3DM(cacheFile.absolutePath) } catch (_: Exception) {}
+                    try { ok = nativeExportFor(formatId, cacheFile.absolutePath) } catch (_: Exception) {}
                     latch.countDown()
                 }
                 latch.await()
                 if (!ok) {
-                    withContext(Dispatchers.Main) { toast("3DM export failed") }
+                    withContext(Dispatchers.Main) { toast("$label export failed") }
                     return@launch
                 }
 
+                // 1) MediaStore (Android 10+): public Downloads/AuraCAD
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     val values = ContentValues().apply {
                         put(MediaStore.Downloads.DISPLAY_NAME, name)
-                        put(MediaStore.Downloads.MIME_TYPE, "model/x-3dm")
+                        put(MediaStore.Downloads.MIME_TYPE, mime)
                         put(MediaStore.Downloads.RELATIVE_PATH, "Download/AuraCAD")
                         put(MediaStore.Downloads.IS_PENDING, 1)
                     }
@@ -606,22 +613,63 @@ class MainActivity : AppCompatActivity() {
                         values.put(MediaStore.Downloads.IS_PENDING, 0)
                         contentResolver.update(uri, values, null, null)
                         cacheFile.delete()
-                        withContext(Dispatchers.Main) { toast("✅ Saved to Downloads/AuraCAD/$name") }
+                        withContext(Dispatchers.Main) {
+                            if (share) { shareUri(uri, mime, name); toast("✅ Exported & ready to share") }
+                            else toast("✅ Saved to Downloads/AuraCAD/$name")
+                        }
                         return@launch
                     }
                 }
-                // Android 9- or MediaStore unavailable → app-specific storage
+                // 2) Android 9- or MediaStore unavailable → app-specific storage
                 val dir = File(getExternalFilesDir(null), "AuraCAD")
                 dir.mkdirs()
                 val out = File(dir, name)
                 cacheFile.copyTo(out, overwrite = true)
                 cacheFile.delete()
                 MediaScannerConnection.scanFile(this@MainActivity, arrayOf(out.absolutePath), null, null)
-                withContext(Dispatchers.Main) { toast("✅ Saved: ${out.absolutePath}") }
+                withContext(Dispatchers.Main) {
+                    if (share) {
+                        val uri = androidx.core.content.FileProvider.getUriForFile(
+                            this@MainActivity, "$packageName.fileprovider", out)
+                        shareUri(uri, mime, name)
+                        toast("✅ Exported & ready to share")
+                    } else toast("✅ Saved: ${out.absolutePath}")
+                }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { toast("Export error: ${e.message}") }
             }
         }
+    }
+
+    /** [label, extension, mime-type] for a format id, or null if unknown. */
+    private fun exportInfo(formatId: String): Triple<String, String, String>? = when (formatId) {
+        "OBJ" -> Triple("OBJ", "obj", "model/obj")
+        "STL" -> Triple("STL", "stl", "model/stl")
+        "PLY" -> Triple("PLY", "ply", "model/ply")
+        "GLB" -> Triple("GLB", "glb", "model/gltf-binary")
+        "3DS" -> Triple("3DS", "3ds", "model/x-3ds")
+        "3DM" -> Triple("3DM", "3dm", "model/x-3dm")
+        else -> null
+    }
+
+    private fun nativeExportFor(formatId: String, path: String): Boolean = when (formatId) {
+        "OBJ" -> NativeLib.nativeExportOBJ(path)
+        "STL" -> NativeLib.nativeExportSTL(path)
+        "PLY" -> NativeLib.nativeExportPLY(path)
+        "GLB" -> NativeLib.nativeExportGLB(path)
+        "3DS" -> NativeLib.nativeExport3DS(path)
+        "3DM" -> NativeLib.nativeExport3DM(path)
+        else -> false
+    }
+
+    private fun shareUri(uri: Uri, mime: String, name: String) {
+        val send = Intent(Intent.ACTION_SEND).apply {
+            type = mime
+            putExtra(Intent.EXTRA_STREAM, uri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            putExtra(Intent.EXTRA_SUBJECT, name)
+        }
+        startActivity(Intent.createChooser(send, "Share $name"))
     }
 
     // ── File open ─────────────────────────────────────────────────────────────
@@ -811,6 +859,10 @@ class MainActivity : AppCompatActivity() {
     private fun openAiSettings() {
         if (supportFragmentManager.findFragmentByTag(AiSettingsFragment.TAG) != null) return
         AiSettingsFragment.newInstance().show(supportFragmentManager, AiSettingsFragment.TAG)
+    }
+    private fun openExport() {
+        if (supportFragmentManager.findFragmentByTag(ExportFragment.TAG) != null) return
+        ExportFragment.newInstance().show(supportFragmentManager, ExportFragment.TAG)
     }
 
     /**

@@ -14,6 +14,7 @@ static inline Vec3 applyMat4Normal(const Mat4& mat, float x, float y, float z);
 #include <cmath>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 #include <set>
 #include <map>
 #include <queue>
@@ -1232,6 +1233,210 @@ bool Renderer::export3DM(const std::string& path) const {
     }
 
     return model.Write(path.c_str(), 6);
+}
+
+// ── GLB export (glTF 2.0 binary) ─────────────────────────────────────────────
+// Minimal but valid glTF 2.0 container: one buffer with interleaved-free
+// POSITION/NORMAL/INDICES per visible mesh, u16 indices when possible.
+// Same global × mesh × mm conversion as the other exporters.
+bool Renderer::exportGLB(const std::string& path) const {
+    struct MeshOut { uint64_t posOff, norOff, idxOff;
+                     uint32_t vCount, iCount; bool u16; };
+    std::vector<MeshOut> outs;
+    std::vector<uint8_t> bin;
+    Mat4 global = buildGlobalMatrix();
+    float toMM = mmPerUnit();
+    Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
+
+    for (const auto& mo : m_meshes) {
+        if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
+        bool u16 = mo.vertices.size() <= 65535;
+        Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
+
+        uint64_t posOff = bin.size();
+        for (const auto& v : mo.vertices) {
+            Vec3 p = applyMat4Point(mtx, v.px, v.py, v.pz);
+            float f[3] = {p.x, p.y, p.z};
+            bin.insert(bin.end(), reinterpret_cast<const uint8_t*>(f),
+                       reinterpret_cast<const uint8_t*>(f) + 12);
+        }
+        uint64_t norOff = bin.size();
+        for (const auto& v : mo.vertices) {
+            Vec3 n = applyMat4Normal(mtx, v.nx, v.ny, v.nz);
+            float f[3] = {n.x, n.y, n.z};
+            bin.insert(bin.end(), reinterpret_cast<const uint8_t*>(f),
+                       reinterpret_cast<const uint8_t*>(f) + 12);
+        }
+        uint64_t idxOff = bin.size();
+        size_t tris = mo.indices.size() / 3;
+        if (u16) {
+            for (size_t i = 0; i < tris; ++i) {
+                uint16_t t[3] = {(uint16_t)mo.indices[i*3+0],
+                                 (uint16_t)mo.indices[i*3+1],
+                                 (uint16_t)mo.indices[i*3+2]};
+                bin.insert(bin.end(), reinterpret_cast<const uint8_t*>(t),
+                           reinterpret_cast<const uint8_t*>(t) + 6);
+            }
+        } else {
+            for (size_t i = 0; i < tris; ++i) {
+                uint32_t t[3] = {mo.indices[i*3+0], mo.indices[i*3+1], mo.indices[i*3+2]};
+                bin.insert(bin.end(), reinterpret_cast<const uint8_t*>(t),
+                           reinterpret_cast<const uint8_t*>(t) + 12);
+            }
+        }
+        outs.push_back({posOff, norOff, idxOff,
+                        (uint32_t)mo.vertices.size(), (uint32_t)(tris * 3), u16});
+    }
+    if (outs.empty()) return false;
+
+    // Build JSON with precise min/max per POSITION accessor
+    std::ostringstream js;
+    js << std::fixed << std::setprecision(6);
+    js << "{\"asset\":{\"version\":\"2.0\",\"generator\":\"AuraCAD\"},"
+       << "\"scene\":0,\"scenes\":[{\"nodes\":[";
+    for (size_t i = 0; i < outs.size(); ++i) { if (i) js << ","; js << i; }
+    js << "]}],\"nodes\":[";
+    for (size_t i = 0; i < outs.size(); ++i) { if (i) js << ","; js << "{\"mesh\":" << i << "}"; }
+    js << "],\"meshes\":[";
+    for (size_t i = 0; i < outs.size(); ++i) {
+        if (i) js << ",";
+        js << "{\"primitives\":[{\"attributes\":{\"POSITION\":" << (3*i)
+           << ",\"NORMAL\":" << (3*i+1) << "},\"indices\":" << (3*i+2)
+           << ",\"mode\":4}]}";
+    }
+    js << "],\"accessors\":[";
+    for (size_t i = 0; i < outs.size(); ++i) {
+        const MeshOut& o = outs[i];
+        // min/max from the stored positions
+        float mn[3] = {FLT_MAX, FLT_MAX, FLT_MAX}, mx[3] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+        for (uint32_t k = 0; k < o.vCount; ++k) {
+            const float* p = reinterpret_cast<const float*>(bin.data() + o.posOff + (size_t)k * 12);
+            for (int c = 0; c < 3; ++c) { mn[c] = std::min(mn[c], p[c]); mx[c] = std::max(mx[c], p[c]); }
+        }
+        js << "{\"bufferView\":" << (3*i) << ",\"componentType\":5126,\"count\":" << o.vCount
+           << ",\"type\":\"VEC3\",\"min\":[" << mn[0] << "," << mn[1] << "," << mn[2]
+           << "],\"max\":[" << mx[0] << "," << mx[1] << "," << mx[2] << "]},";
+        js << "{\"bufferView\":" << (3*i+1) << ",\"componentType\":5126,\"count\":" << o.vCount
+           << ",\"type\":\"VEC3\"},";
+        js << "{\"bufferView\":" << (3*i+2) << ",\"componentType\":" << (o.u16 ? 5123 : 5125)
+           << ",\"count\":" << o.iCount << ",\"type\":\"SCALAR\"}";
+        if (i + 1 < outs.size()) js << ",";
+    }
+    js << "],\"bufferViews\":[";
+    for (size_t i = 0; i < outs.size(); ++i) {
+        const MeshOut& o = outs[i];
+        js << "{\"buffer\":0,\"byteOffset\":" << o.posOff << ",\"byteLength\":" << (o.vCount*12)
+           << ",\"target\":34962},";
+        js << "{\"buffer\":0,\"byteOffset\":" << o.norOff << ",\"byteLength\":" << (o.vCount*12)
+           << ",\"target\":34962},";
+        js << "{\"buffer\":0,\"byteOffset\":" << o.idxOff << ",\"byteLength\":"
+           << (o.iCount * (o.u16 ? 2u : 4u)) << ",\"target\":34963}";
+        if (i + 1 < outs.size()) js << ",";
+    }
+    js << "],\"buffers\":[{\"byteLength\":" << bin.size() << "}]}";
+
+    std::string json = js.str();
+    // GLB container with 4-byte chunk alignment
+    const uint32_t magic = 0x46546C67u;  // 'glTF'
+    const uint32_t jsonLen = (uint32_t)json.size();
+    const uint32_t jsonPad = (4 - (jsonLen & 3)) & 3;
+    const uint32_t binLen = (uint32_t)bin.size();
+    const uint32_t binPad = (4 - (binLen & 3)) & 3;
+    const uint32_t total = 12 + 8 + jsonLen + jsonPad + 8 + binLen + binPad;
+
+    std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+    uint32_t v2 = 2;
+    f.write(reinterpret_cast<const char*>(&magic), 4);
+    f.write(reinterpret_cast<const char*>(&v2), 4);
+    f.write(reinterpret_cast<const char*>(&total), 4);
+    uint32_t cjLen = jsonLen + jsonPad, cjType = 0x4E4F534Au;  // 'JSON'
+    f.write(reinterpret_cast<const char*>(&cjLen), 4);
+    f.write(reinterpret_cast<const char*>(&cjType), 4);
+    f.write(json.c_str(), json.size());
+    for (uint32_t i = 0; i < jsonPad; ++i) f.put(' ');
+    uint32_t cbLen = binLen + binPad, cbType = 0x004E4942u;  // 'BIN\0'
+    f.write(reinterpret_cast<const char*>(&cbLen), 4);
+    f.write(reinterpret_cast<const char*>(&cbType), 4);
+    if (!bin.empty()) f.write(reinterpret_cast<const char*>(bin.data()), bin.size());
+    for (uint32_t i = 0; i < binPad; ++i) f.put('\0');
+    return true;
+}
+
+// ── 3DS export (legacy chunk format) ─────────────────────────────────────────
+bool Renderer::export3DS(const std::string& path) const {
+    Mat4 global = buildGlobalMatrix();
+    float toMM = mmPerUnit();
+    Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
+
+    auto appendChunk = [](std::vector<uint8_t>& parent, uint16_t id,
+                          const std::vector<uint8_t>& data) {
+        uint32_t len = 6u + (uint32_t)data.size();
+        uint8_t hdr[6];
+        memcpy(hdr, &id, 2);
+        memcpy(hdr + 2, &len, 4);
+        parent.insert(parent.end(), hdr, hdr + 6);
+        parent.insert(parent.end(), data.begin(), data.end());
+    };
+
+    std::vector<uint8_t> editor;   // 0x3D3D content
+    int meshIndex = 0;
+    for (const auto& mo : m_meshes) {
+        if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
+        if (mo.vertices.size() > 65535) continue;   // 3DS uses u16 indices
+        Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
+
+        std::vector<uint8_t> objData;   // 0x4000 content: name + 0x4100
+        std::string name = mo.name.empty() ? "Mesh" + std::to_string(meshIndex) : mo.name;
+        for (char ch : name) objData.push_back((uint8_t)ch);
+        objData.push_back(0);
+        if (objData.size() & 1) objData.push_back(0);   // pad name to even length
+
+        std::vector<uint8_t> triData;   // 0x4100 content: 0x4110 + 0x4120
+        {
+            std::vector<uint8_t> vd;    // 0x4110: u16 count + vertices
+            uint16_t vc = (uint16_t)mo.vertices.size();
+            vd.insert(vd.end(), reinterpret_cast<const uint8_t*>(&vc),
+                      reinterpret_cast<const uint8_t*>(&vc) + 2);
+            for (const auto& v : mo.vertices) {
+                Vec3 p = applyMat4Point(mtx, v.px, v.py, v.pz);
+                float f3[3] = {p.x, p.y, p.z};
+                vd.insert(vd.end(), reinterpret_cast<const uint8_t*>(f3),
+                          reinterpret_cast<const uint8_t*>(f3) + 12);
+            }
+            appendChunk(triData, 0x4110, vd);
+        }
+        {
+            std::vector<uint8_t> fd;    // 0x4120: u16 count + (3×u16 idx + u16 flags)
+            uint16_t fc = (uint16_t)(mo.indices.size() / 3);
+            fd.insert(fd.end(), reinterpret_cast<const uint8_t*>(&fc),
+                      reinterpret_cast<const uint8_t*>(&fc) + 2);
+            for (size_t i = 0; i < mo.indices.size(); i += 3) {
+                uint16_t t[4] = {(uint16_t)mo.indices[i+0], (uint16_t)mo.indices[i+1],
+                                 (uint16_t)mo.indices[i+2], 0};
+                fd.insert(fd.end(), reinterpret_cast<const uint8_t*>(t),
+                          reinterpret_cast<const uint8_t*>(t) + 8);
+            }
+            appendChunk(triData, 0x4120, fd);
+        }
+        appendChunk(objData, 0x4100, triData);
+        appendChunk(editor, 0x4000, objData);
+        ++meshIndex;
+    }
+    if (editor.empty()) return false;
+
+    std::vector<uint8_t> mainChunk;    // 0x4D4D content: 0x3D3D
+    appendChunk(mainChunk, 0x3D3D, editor);
+
+    std::ofstream f(path, std::ios::binary);
+    if (!f) return false;
+    uint16_t id = 0x4D4D;
+    uint32_t len = 6u + (uint32_t)mainChunk.size();
+    f.write(reinterpret_cast<const char*>(&id), 2);
+    f.write(reinterpret_cast<const char*>(&len), 4);
+    f.write(reinterpret_cast<const char*>(mainChunk.data()),
+            (std::streamsize)mainChunk.size());
+    return true;
 }
 
 // ── Combine meshes ───────────────────────────────────────────────────────────

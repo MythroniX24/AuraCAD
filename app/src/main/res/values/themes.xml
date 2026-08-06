@@ -26,11 +26,11 @@
 
     <!-- Top-bar icon button (Undo/Redo/Reset/Overflow) -->
     <style name="TopBarBtn">
-        <item name="android:layout_width">44dp</item>
-        <item name="android:layout_height">44dp</item>
-        <item name="android:padding">10dp</item>
-        <item name="android:layout_marginStart">2dp</item>
-        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:layout_width">36dp</item>
+        <item name="android:layout_height">36dp</item>
+        <item name="android:padding">8dp</item>
+        <item name="android:layout_marginStart">1dp</item>
+        <item name="android:layout_marginEnd">1dp</item>
         <item name="android:scaleType">centerInside</item>
         <item name="android:background">@drawable/bg_top_bar_btn</item>
         <item name="android:tint">@color/text_secondary</item>
@@ -67,11 +67,11 @@
 
     <!-- Legacy ToolbarBtn kept for backward compat (now hidden in new layout) -->
     <style name="TopBarBtnAccent">
-        <item name="android:layout_width">44dp</item>
-        <item name="android:layout_height">44dp</item>
-        <item name="android:padding">10dp</item>
-        <item name="android:layout_marginStart">2dp</item>
-        <item name="android:layout_marginEnd">2dp</item>
+        <item name="android:layout_width">36dp</item>
+        <item name="android:layout_height">36dp</item>
+        <item name="android:padding">8dp</item>
+        <item name="android:layout_marginStart">1dp</item>
+        <item name="android:layout_marginEnd">1dp</item>
         <item name="android:scaleType">centerInside</item>
         <item name="android:background">@drawable/bg_top_bar_btn</item>
         <item name="android:tint">@color/accent_cyan</item>

@@ -389,7 +389,27 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeGetMeshVertexCount
     LOCK_OR_ZERO(); return (jint)g_renderer->getMeshVertexCount((int)idx);
 }
 
-// ── 3DM Export (openNURBS) ───────────────────────────────────────────────────
+// ── Export (all formats) ─────────────────────────────────────────────────────
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExportOBJ(JNIEnv* env, jclass, jstring path){
+    LOCK_OR_FALSE();
+    return g_renderer->exportOBJ(jstr(env, path)) ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExportSTL(JNIEnv* env, jclass, jstring path){
+    LOCK_OR_FALSE();
+    return g_renderer->exportSTL(jstr(env, path)) ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExportPLY(JNIEnv* env, jclass, jstring path){
+    LOCK_OR_FALSE();
+    return g_renderer->exportPLY(jstr(env, path)) ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExportGLB(JNIEnv* env, jclass, jstring path){
+    LOCK_OR_FALSE();
+    return g_renderer->exportGLB(jstr(env, path)) ? JNI_TRUE : JNI_FALSE;
+}
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExport3DS(JNIEnv* env, jclass, jstring path){
+    LOCK_OR_FALSE();
+    return g_renderer->export3DS(jstr(env, path)) ? JNI_TRUE : JNI_FALSE;
+}
 JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExport3DM(JNIEnv* env, jclass, jstring path){
     LOCK_OR_FALSE();
     return g_renderer->export3DM(jstr(env, path)) ? JNI_TRUE : JNI_FALSE;

@@ -209,6 +209,10 @@ public:
     /** Rhino 3DM (openNURBS) — writes every visible mesh as an ON_Mesh in
      *  document units = millimetres, v6 format (Rhino 6/7/8 + others). */
     bool export3DM(const std::string& path) const;
+    /** glTF 2.0 binary (.glb) — positions + normals, u16/u32 indices. */
+    bool exportGLB(const std::string& path) const;
+    /** Legacy Autodesk 3DS — chunk-based triangle meshes (u16 indices). */
+    bool export3DS(const std::string& path) const;
 
     /** Merge [indices] meshes into a single mesh (originals removed). */
     bool combineMeshes(const std::vector<int>& indices);
