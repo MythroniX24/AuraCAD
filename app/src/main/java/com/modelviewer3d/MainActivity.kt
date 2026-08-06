@@ -295,23 +295,25 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 1, 0, "Open Model…")
         popup.menu.add(0, 2, 1, "Edit / Materials")
         popup.menu.add(0, 3, 2, "Mesh List")
-        popup.menu.add(0, 4, 3, if (rulerActive) "Disable Ruler" else "Ruler")
-        popup.menu.add(0, 5, 4, "Screenshot")
-        popup.menu.add(0, 6, 5, "Export…")
-        popup.menu.add(0, 7, 6, "🛠 Transform Panel")
-        popup.menu.add(0, 8, 7, "✨ AI Assistant")
-        popup.menu.add(0, 9, 8, "🔋 Battery Optimization")
+        popup.menu.add(0, 4, 3, "⬡ Mesh Separation")
+        popup.menu.add(0, 5, 4, if (rulerActive) "Disable Ruler" else "Ruler")
+        popup.menu.add(0, 6, 5, "Screenshot")
+        popup.menu.add(0, 7, 6, "Export…")
+        popup.menu.add(0, 8, 7, "🛠 Transform Panel")
+        popup.menu.add(0, 9, 8, "✨ AI Assistant")
+        popup.menu.add(0, 10, 9, "🔋 Battery Optimization")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> findViewById<View>(R.id.btnOpen).performClick()
                 2 -> findViewById<View>(R.id.btnEdit).performClick()
                 3 -> findViewById<View>(R.id.btnMeshList).performClick()
-                4 -> btnRuler?.performClick()
-                5 -> findViewById<View>(R.id.btnScreenshot).performClick()
-                6 -> findViewById<View>(R.id.btnExport).performClick()
-                7 -> openMeshTools()
-                8 -> openAiSettings()
-                9 -> requestBatteryOptimizationExemption()
+                4 -> openSeparation()
+                5 -> btnRuler?.performClick()
+                6 -> findViewById<View>(R.id.btnScreenshot).performClick()
+                7 -> findViewById<View>(R.id.btnExport).performClick()
+                8 -> openMeshTools()
+                9 -> openAiSettings()
+                10 -> requestBatteryOptimizationExemption()
             }
             true
         }
@@ -911,6 +913,10 @@ class MainActivity : AppCompatActivity() {
     private fun openMeshList() {
         if (supportFragmentManager.findFragmentByTag(MeshListFragment.TAG) != null) return
         MeshListFragment.newInstance().show(supportFragmentManager, MeshListFragment.TAG)
+    }
+    private fun openSeparation() {
+        if (supportFragmentManager.findFragmentByTag(SeparationFragment.TAG) != null) return
+        SeparationFragment.newInstance().show(supportFragmentManager, SeparationFragment.TAG)
     }
     private fun openAiSettings() {
         if (supportFragmentManager.findFragmentByTag(AiSettingsFragment.TAG) != null) return
