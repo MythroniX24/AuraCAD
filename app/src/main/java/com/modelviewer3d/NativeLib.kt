@@ -100,10 +100,6 @@ object NativeLib {
     /** Reset per-mesh transform to identity. Pushes one undo entry. */
     external fun nativeResetMeshTransform(idx: Int)
 
-    // Export
-    external fun nativeExportOBJ(path: String): Boolean
-    external fun nativeExportSTL(path: String): Boolean
-
     // Ruler
     external fun nativePickPoint(sx: Float, sy: Float, sw: Float, sh: Float): FloatArray?
     external fun nativeSetRulerPoints(hasP1: Boolean, p1: FloatArray?, hasP2: Boolean, p2: FloatArray?)
@@ -137,7 +133,6 @@ object NativeLib {
     external fun nativeGetNormalizeScale(): Float
     /** Current mm per normalized unit — the single conversion for world→mm distances. */
     external fun nativeGetMMPerUnit(): Float
-    external fun nativeExportPLY(path: String): Boolean
     external fun nativeCombineMeshes(indices: IntArray): Boolean
 
     // ── Brush Tools ───────────────────────────────────────────────────────────

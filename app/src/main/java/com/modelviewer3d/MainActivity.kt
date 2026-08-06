@@ -28,7 +28,6 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.PopupMenu
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.FileProvider
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +37,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.channels.Channels
 import java.text.SimpleDateFormat
@@ -174,7 +172,6 @@ class MainActivity : AppCompatActivity() {
             btnRuler?.setOnClickListener                              { toggleRulerMode() }
             findViewById<View>(R.id.btnRingTool).setOnClickListener   { openRingTool() }
             findViewById<View>(R.id.btnMeshTools).setOnClickListener  { openMeshTools() }
-            findViewById<View>(R.id.btnExport).setOnClickListener     { showExportSheet() }
             findViewById<View>(R.id.btnScreenshot).setOnClickListener { takeScreenshot() }
 
             // ── Top-bar primary actions ──────────────────────────────────────
@@ -298,10 +295,9 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 4, 3, "⬡ Mesh Separation")
         popup.menu.add(0, 5, 4, if (rulerActive) "Disable Ruler" else "Ruler")
         popup.menu.add(0, 6, 5, "Screenshot")
-        popup.menu.add(0, 7, 6, "Export…")
-        popup.menu.add(0, 8, 7, "🛠 Transform Panel")
-        popup.menu.add(0, 9, 8, "✨ AI Assistant")
-        popup.menu.add(0, 10, 9, "🔋 Battery Optimization")
+        popup.menu.add(0, 7, 6, "🛠 Transform Panel")
+        popup.menu.add(0, 8, 7, "✨ AI Assistant")
+        popup.menu.add(0, 9, 8, "🔋 Battery Optimization")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> findViewById<View>(R.id.btnOpen).performClick()
@@ -310,10 +306,9 @@ class MainActivity : AppCompatActivity() {
                 4 -> openSeparation()
                 5 -> btnRuler?.performClick()
                 6 -> findViewById<View>(R.id.btnScreenshot).performClick()
-                7 -> findViewById<View>(R.id.btnExport).performClick()
-                8 -> openMeshTools()
-                9 -> openAiSettings()
-                10 -> requestBatteryOptimizationExemption()
+                7 -> openMeshTools()
+                8 -> openAiSettings()
+                9 -> requestBatteryOptimizationExemption()
             }
             true
         }
@@ -565,169 +560,6 @@ class MainActivity : AppCompatActivity() {
         if (rulerActive) tvRulerInfo?.text = "Tap mesh surface — Point 1"
     }
 
-    // ── Export Sheet ──────────────────────────────────────────────────────────
-    private fun showExportSheet() {
-        if (supportFragmentManager.findFragmentByTag(ExportFragment.TAG) != null) return
-        ExportFragment.newInstance().show(supportFragmentManager, ExportFragment.TAG)
-    }
-
-    /**
-     * Export model to OBJ or STL.
-     * - share=false → saves to Downloads/AuraCAD/ (visible in Files app, no permission needed)
-     * - share=true  → exports to cache then shares via system chooser
-     */
-    fun exportModel(format: String, share: Boolean, shareApp: String? = null) {
-        lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-                val baseName = if (currentFileName.isNotEmpty())
-                    currentFileName.substringBeforeLast('.') else "model"
-                val fileName = "${baseName}_$ts.$format"
-
-                // For sharing: write to cache first
-                if (share) {
-                    val cacheFile = File(cacheDir, fileName)
-                    val ok = runExportNative(format, cacheFile)
-                    withContext(Dispatchers.Main) {
-                        if (!ok) { toast("Export failed"); return@withContext }
-                        val uri = FileProvider.getUriForFile(
-                            this@MainActivity, "$packageName.fileprovider", cacheFile)
-                        val mimeType = when(format) {
-                            "obj" -> "model/obj"
-                            "stl" -> "model/stl"
-                            "ply" -> "model/ply"
-                            else  -> "application/octet-stream"
-                        }
-                        val intent = Intent(Intent.ACTION_SEND).apply {
-                            type = mimeType
-                            putExtra(Intent.EXTRA_STREAM, uri)
-                            putExtra(Intent.EXTRA_SUBJECT, "3D Model: $fileName")
-                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                            if (shareApp != null) setPackage(shareApp)
-                        }
-                        try {
-                            startActivity(Intent.createChooser(intent, "Share 3D Model via"))
-                        } catch (_: Exception) {
-                            toast("App not installed")
-                        }
-                    }
-                    return@launch
-                }
-
-                // ── Save to device ─────────────────────────────────────────────
-                // Android 10+ (API 29+): use MediaStore.Downloads (no permission needed)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    saveToMediaStoreDownloads(fileName, format)
-                } else {
-                    // Android 9 and below: write directly to public Downloads
-                    saveToPublicDownloads(fileName, format)
-                }
-
-            } catch (e: Exception) {
-                withContext(Dispatchers.Main) { toast("Error: ${e.message}") }
-            }
-        }
-    }
-
-    /**
-     * Android 10+ (API 29+): Insert into MediaStore.Downloads.
-     * File appears in: Files → Downloads → AuraCAD/
-     * No permission required.
-     */
-    private suspend fun saveToMediaStoreDownloads(fileName: String, format: String) {
-        val mimeType = when(format) { "obj" -> "model/obj"; "stl" -> "model/stl"; "ply" -> "model/ply"; else -> "application/octet-stream" }
-
-        // Write native export to cache first (native needs a real file path)
-        val cacheFile = File(cacheDir, fileName)
-        val ok = runExportNative(format, cacheFile)
-        if (!ok) {
-            withContext(Dispatchers.Main) { toast("Export failed") }
-            return
-        }
-
-        try {
-            val values = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                put(MediaStore.Downloads.MIME_TYPE, mimeType)
-                put(MediaStore.Downloads.RELATIVE_PATH, "Download/AuraCAD")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-            val resolver = contentResolver
-            val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val itemUri = resolver.insert(collection, values)
-
-            if (itemUri != null) {
-                resolver.openOutputStream(itemUri)?.use { out ->
-                    FileInputStream(cacheFile).use { it.copyTo(out) }
-                }
-                values.clear()
-                values.put(MediaStore.Downloads.IS_PENDING, 0)
-                resolver.update(itemUri, values, null, null)
-                cacheFile.delete()
-                withContext(Dispatchers.Main) {
-                    toast("✅ Saved to Downloads/AuraCAD/$fileName")
-                }
-            } else {
-                // MediaStore insert failed → fall back to app external storage
-                saveFallback(fileName, format, cacheFile)
-            }
-        } catch (e: Exception) {
-            saveFallback(fileName, format, cacheFile)
-        }
-    }
-
-    /**
-     * Android 9 and below: write to public Downloads directly.
-     */
-    private suspend fun saveToPublicDownloads(fileName: String, format: String) {
-        val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "AuraCAD")
-        dir.mkdirs()
-        val outFile = File(dir, fileName)
-        val ok = runExportNative(format, outFile)
-        withContext(Dispatchers.Main) {
-            if (!ok) { toast("Export failed"); return@withContext }
-            MediaScannerConnection.scanFile(this@MainActivity, arrayOf(outFile.absolutePath), null, null)
-            toast("✅ Saved to Downloads/AuraCAD/$fileName")
-        }
-    }
-
-    /**
-     * Fallback: save to app-specific external storage (always works, visible in file managers).
-     * Path: /sdcard/Android/data/com.modelviewer3d/files/AuraCAD/
-     */
-    private suspend fun saveFallback(fileName: String, format: String, cacheFile: File) {
-        val dir = File(getExternalFilesDir(null), "AuraCAD")
-        dir.mkdirs()
-        val outFile = File(dir, fileName)
-        cacheFile.copyTo(outFile, overwrite = true)
-        cacheFile.delete()
-        withContext(Dispatchers.Main) {
-            toast("✅ Saved to Android/data/com.modelviewer3d/files/AuraCAD/$fileName")
-        }
-    }
-
-    /**
-     * Run the native export on the GL thread and wait for result.
-     */
-    private fun runExportNative(format: String, outFile: File): Boolean {
-        outFile.parentFile?.mkdirs()
-        var ok = false
-        val latch = CountDownLatch(1)
-        glView.queueEvent {
-            try {
-                ok = when (format) {
-                    "obj" -> NativeLib.nativeExportOBJ(outFile.absolutePath)
-                    "stl" -> NativeLib.nativeExportSTL(outFile.absolutePath)
-                    "ply" -> NativeLib.nativeExportPLY(outFile.absolutePath)
-                    else  -> false
-                }
-            } catch (_: Exception) {}
-            latch.countDown()
-        }
-        latch.await()
-        return ok
-    }
-
     // ── File open ─────────────────────────────────────────────────────────────
     private fun requestOpenFile() {
         if (hasStoragePermission()) launchFilePicker() else requestStoragePermission()
@@ -787,7 +619,7 @@ class MainActivity : AppCompatActivity() {
                 // bundled. Fail gracefully instead of showing a parse error.
                 if (name.lowercase().endsWith(".3dm")) {
                     withContext(Dispatchers.Main) {
-                        toast("3DM (Rhino) needs openNURBS and isn't bundled. Please export the model to STL / OBJ / PLY / 3DS first.")
+                        toast("3DM (Rhino) isn't supported — please use STL / OBJ / GLB / PLY / 3DS.")
                     }
                     return@launch
                 }

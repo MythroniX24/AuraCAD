@@ -324,7 +324,6 @@
         <View android:id="@+id/btnRuler" android:layout_width="1dp" android:layout_height="1dp" />
         <View android:id="@+id/btnRingTool" android:layout_width="1dp" android:layout_height="1dp" />
         <View android:id="@+id/btnMeshTools" android:layout_width="1dp" android:layout_height="1dp" />
-        <View android:id="@+id/btnExport" android:layout_width="1dp" android:layout_height="1dp" />
         <View android:id="@+id/btnScreenshot" android:layout_width="1dp" android:layout_height="1dp" />
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>
