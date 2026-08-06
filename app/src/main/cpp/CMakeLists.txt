@@ -38,7 +38,7 @@ FetchContent_Declare(
     # and only applies when needed (keeps `git apply` from failing on re-runs).
     # NOTE: don't inline shell with ';' here — FetchContent splits
     # PATCH_COMMAND on semicolons, so a helper script is used instead.
-    PATCH_COMMAND sh ${CMAKE_CURRENT_SOURCE_DIR}/patch_opennurbs.sh ${CMAKE_CURRENT_SOURCE_DIR}/opennurbs_android_font.patch
+    PATCH_COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/patch_opennurbs.sh" "${CMAKE_CURRENT_SOURCE_DIR}/opennurbs_android_font.patch"
 )
 
 FetchContent_MakeAvailable(tinyobjloader tinygltf opennurbs)

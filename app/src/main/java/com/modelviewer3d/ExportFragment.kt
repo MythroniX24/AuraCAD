@@ -68,7 +68,7 @@ class ExportFragment : BottomSheetDialogFragment() {
         root.addView(UISheetKit.card(ctx, marginTopDp = 0).apply {
             addView(UISheetKit.cardTitle(ctx, "SOURCE MODEL", "#4DD8FF"))
             val act = requireActivity()
-            val name = if (act is MainActivity) act.currentFileName.ifEmpty { "Untitled scene" }
+            val name = if (act is MainActivity) act.currentDisplayFileName.ifEmpty { "Untitled scene" }
                        else "Untitled scene"
             addView(TextView(ctx).apply {
                 text = name

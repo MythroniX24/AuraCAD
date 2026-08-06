@@ -92,7 +92,9 @@ class MainActivity : AppCompatActivity() {
     private var rulerPoint1: FloatArray? = null
     private var rulerPoint2: FloatArray? = null
     private var rulerActive = false
-    var currentFileName = ""
+    private var currentFileName = ""
+    /** Read-only display name for bottom sheets; mutation stays inside the activity. */
+    val currentDisplayFileName: String get() = currentFileName
 
     // App-scoped loader — deliberately NOT lifecycleScope: if the user presses
     // back / backgrounds the app mid-load, parsing keeps running and a
