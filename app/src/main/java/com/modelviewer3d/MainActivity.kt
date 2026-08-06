@@ -616,7 +616,7 @@ class MainActivity : AppCompatActivity() {
                 val out = File(dir, name)
                 cacheFile.copyTo(out, overwrite = true)
                 cacheFile.delete()
-                MediaScannerConnection.scanFile(this, arrayOf(out.absolutePath), null, null)
+                MediaScannerConnection.scanFile(this@MainActivity, arrayOf(out.absolutePath), null, null)
                 withContext(Dispatchers.Main) { toast("✅ Saved: ${out.absolutePath}") }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) { toast("Export error: ${e.message}") }
