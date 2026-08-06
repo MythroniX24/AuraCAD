@@ -20,7 +20,18 @@ FetchContent_Declare(
     GIT_SHALLOW    TRUE
 )
 
-FetchContent_MakeAvailable(tinyobjloader tinygltf)
+# Rhino 3DM (openNURBS) — official McNeel SDK. Provides ONX_Model read/write
+# for .3dm files (meshes + NURBS surfaces/breps tessellated on load).
+# The opennurbsStatic target brings its own zlib / freetype / android_uuid
+# sub-builds, so everything is self-contained per ABI.
+FetchContent_Declare(
+    opennurbs
+    GIT_REPOSITORY https://github.com/mcneel/openNURBS.git
+    GIT_TAG        v8.9.24194.18121
+    GIT_SHALLOW    TRUE
+)
+
+FetchContent_MakeAvailable(tinyobjloader tinygltf opennurbs)
 
 add_library(
     modelviewer
@@ -48,6 +59,7 @@ target_link_libraries(modelviewer
     ${android-lib}
     ${gles3-lib}
     ${egl-lib}
+    opennurbsStatic
 )
 
 # ── Base flags for ALL ABIs ────────────────────────────────────────────────────

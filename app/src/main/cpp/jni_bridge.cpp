@@ -389,6 +389,12 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeGetMeshVertexCount
     LOCK_OR_ZERO(); return (jint)g_renderer->getMeshVertexCount((int)idx);
 }
 
+// ── 3DM Export (openNURBS) ───────────────────────────────────────────────────
+JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeExport3DM(JNIEnv* env, jclass, jstring path){
+    LOCK_OR_FALSE();
+    return g_renderer->export3DM(jstr(env, path)) ? JNI_TRUE : JNI_FALSE;
+}
+
 // ── Ruler ────────────────────────────────────────────────────────────────────
 JNIEXPORT jfloatArray JNICALL Java_com_modelviewer3d_NativeLib_nativePickPoint(JNIEnv* env,jclass,jfloat sx,jfloat sy,jfloat sw,jfloat sh){
     float pt[3];

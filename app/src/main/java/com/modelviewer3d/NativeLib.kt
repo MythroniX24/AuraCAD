@@ -135,6 +135,9 @@ object NativeLib {
     external fun nativeGetMMPerUnit(): Float
     external fun nativeCombineMeshes(indices: IntArray): Boolean
 
+    // Rhino 3DM (openNURBS)
+    external fun nativeExport3DM(path: String): Boolean
+
     // ── Brush Tools ───────────────────────────────────────────────────────────
     /** Laplacian smooth brush: applies iterative smoothing within [radius] mm
      *  around world-space point (cx,cy,cz) on [meshIdx]. [strength] in 0..1. */

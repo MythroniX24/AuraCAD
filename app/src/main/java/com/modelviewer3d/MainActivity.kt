@@ -295,9 +295,10 @@ class MainActivity : AppCompatActivity() {
         popup.menu.add(0, 4, 3, "⬡ Mesh Separation")
         popup.menu.add(0, 5, 4, if (rulerActive) "Disable Ruler" else "Ruler")
         popup.menu.add(0, 6, 5, "Screenshot")
-        popup.menu.add(0, 7, 6, "🛠 Transform Panel")
-        popup.menu.add(0, 8, 7, "✨ AI Assistant")
-        popup.menu.add(0, 9, 8, "🔋 Battery Optimization")
+        popup.menu.add(0, 7, 6, "💾 Export 3DM…")
+        popup.menu.add(0, 8, 7, "🛠 Transform Panel")
+        popup.menu.add(0, 9, 8, "✨ AI Assistant")
+        popup.menu.add(0, 10, 9, "🔋 Battery Optimization")
         popup.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 1 -> findViewById<View>(R.id.btnOpen).performClick()
@@ -306,9 +307,10 @@ class MainActivity : AppCompatActivity() {
                 4 -> openSeparation()
                 5 -> btnRuler?.performClick()
                 6 -> findViewById<View>(R.id.btnScreenshot).performClick()
-                7 -> openMeshTools()
-                8 -> openAiSettings()
-                9 -> requestBatteryOptimizationExemption()
+                7 -> export3DM()
+                8 -> openMeshTools()
+                9 -> openAiSettings()
+                10 -> requestBatteryOptimizationExemption()
             }
             true
         }
@@ -560,6 +562,68 @@ class MainActivity : AppCompatActivity() {
         if (rulerActive) tvRulerInfo?.text = "Tap mesh surface — Point 1"
     }
 
+    // ── Export 3DM (openNURBS) ────────────────────────────────────────────────
+    // Writes the current model as a Rhino .3dm (v6, millimetres). Saves to
+    // Downloads/AuraCAD/ on Android 10+ via MediaStore, app storage otherwise.
+    private fun export3DM() {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                if (currentFileName.isEmpty()) {
+                    withContext(Dispatchers.Main) { toast("Load a model first") }
+                    return@launch
+                }
+                val ts = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val base = currentFileName.substringBeforeLast('.', "model")
+                val name = "${base}_$ts.3dm"
+
+                val cacheFile = File(cacheDir, name)
+                var ok = false
+                val latch = CountDownLatch(1)
+                glView.queueEvent {
+                    try { ok = NativeLib.nativeExport3DM(cacheFile.absolutePath) } catch (_: Exception) {}
+                    latch.countDown()
+                }
+                latch.await()
+                if (!ok) {
+                    withContext(Dispatchers.Main) { toast("3DM export failed") }
+                    return@launch
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, name)
+                        put(MediaStore.Downloads.MIME_TYPE, "model/x-3dm")
+                        put(MediaStore.Downloads.RELATIVE_PATH, "Download/AuraCAD")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+                    }
+                    val uri = contentResolver.insert(
+                        MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values)
+                    if (uri != null) {
+                        contentResolver.openOutputStream(uri)?.use { out ->
+                            cacheFile.inputStream().use { it.copyTo(out) }
+                        }
+                        values.clear()
+                        values.put(MediaStore.Downloads.IS_PENDING, 0)
+                        contentResolver.update(uri, values, null, null)
+                        cacheFile.delete()
+                        withContext(Dispatchers.Main) { toast("✅ Saved to Downloads/AuraCAD/$name") }
+                        return@launch
+                    }
+                }
+                // Android 9- or MediaStore unavailable → app-specific storage
+                val dir = File(getExternalFilesDir(null), "AuraCAD")
+                dir.mkdirs()
+                val out = File(dir, name)
+                cacheFile.copyTo(out, overwrite = true)
+                cacheFile.delete()
+                MediaScannerConnection.scanFile(this, arrayOf(out.absolutePath), null, null)
+                withContext(Dispatchers.Main) { toast("✅ Saved: ${out.absolutePath}") }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) { toast("Export error: ${e.message}") }
+            }
+        }
+    }
+
     // ── File open ─────────────────────────────────────────────────────────────
     private fun requestOpenFile() {
         if (hasStoragePermission()) launchFilePicker() else requestStoragePermission()
@@ -579,7 +643,7 @@ class MainActivity : AppCompatActivity() {
         filePicker.launch(arrayOf(
             "*/*",
             "model/stl", "model/obj", "model/gltf-binary", "model/gltf+json",
-            "model/ply", "model/x-3ds", "application/x-3ds",
+            "model/ply", "model/x-3ds", "application/x-3ds", "model/x-3dm",
             "application/octet-stream"
         ))
     }
@@ -615,14 +679,6 @@ class MainActivity : AppCompatActivity() {
 
                 currentFileName = name
 
-                // 3DM (Rhino) needs the huge proprietary openNURBS toolkit — not
-                // bundled. Fail gracefully instead of showing a parse error.
-                if (name.lowercase().endsWith(".3dm")) {
-                    withContext(Dispatchers.Main) {
-                        toast("3DM (Rhino) isn't supported — please use STL / OBJ / GLB / PLY / 3DS.")
-                    }
-                    return@launch
-                }
                 // GLTF (JSON) isn't supported — only GLB is. Give a clear message
                 // instead of a confusing "Failed to parse".
                 if (name.lowercase().endsWith(".gltf")) {
@@ -634,7 +690,7 @@ class MainActivity : AppCompatActivity() {
 
                 // Delete old cached model files to prevent storage bloat
                 cacheDir.listFiles { f -> f.extension.lowercase() in
-                    setOf("stl","obj","glb","gltf","ply","3ds","3mf","fbx","dae") }
+                    setOf("stl","obj","glb","gltf","ply","3ds","3dm","3mf","fbx","dae") }
                     ?.forEach { it.delete() }
 
                 val dest = File(cacheDir, name)
@@ -705,7 +761,8 @@ class MainActivity : AppCompatActivity() {
     private fun hasKnownExtension(name: String): Boolean {
         val low = name.lowercase()
         return low.endsWith(".obj") || low.endsWith(".stl") || low.endsWith(".glb") ||
-               low.endsWith(".gltf") || low.endsWith(".ply") || low.endsWith(".3ds")
+               low.endsWith(".gltf") || low.endsWith(".ply") || low.endsWith(".3ds") ||
+               low.endsWith(".3dm")
     }
 
     private fun mimeToExtension(mime: String): String = when {
@@ -715,6 +772,7 @@ class MainActivity : AppCompatActivity() {
         "gltf+json" in mime || mime == "model/gltf+json" -> "gltf"
         "ply" in mime || mime == "model/ply"            -> "ply"
         "3ds" in mime                                    -> "3ds"
+        "3dm" in mime                                    -> "3dm"
         else -> ""
     }
 

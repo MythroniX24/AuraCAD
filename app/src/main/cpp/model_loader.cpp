@@ -14,6 +14,11 @@
 #include <utility>
 #include <cstdint>
 
+// Rhino 3DM support — official McNeel openNURBS SDK (v8.x, fetched by CMake).
+// Only the public umbrella header is needed here; the static lib is linked
+// via the CMake target opennurbsStatic.
+#include "opennurbs.h"
+
 #define TINYOBJLOADER_IMPLEMENTATION
 #include "tiny_obj_loader.h"
 
@@ -38,6 +43,7 @@ bool ModelLoader::load(const std::string& path, ModelData& data) {
     else if (ext.size()>=4 && ext.rfind(".glb")==ext.size()-4) ok=loadGLB(path,data);
     else if (ext.size()>=4 && ext.rfind(".ply")==ext.size()-4) ok=loadPLY(path,data);
     else if (ext.size()>=4 && ext.rfind(".3ds")==ext.size()-4) ok=load3DS(path,data);
+    else if (ext.size()>=4 && ext.rfind(".3dm")==ext.size()-4) ok=load3DM(path,data);
     else { LOGE("Unsupported: %s", path.c_str()); return false; }
 
     if (!ok) { LOGE("Failed: %s", path.c_str()); return false; }
@@ -513,6 +519,171 @@ bool ModelLoader::load3DS(const std::string& path, ModelData& data){
     };
     walk(c, c.end);
     return !data.vertices.empty() && !data.indices.empty();
+}
+
+// ── 3DM (Rhino, openNURBS) ───────────────────────────────────────────────────
+// openNURBS gives us every geometry object in the file. We convert:
+//   • ON_Mesh          → copied directly (quads split into triangles)
+//   • ON_Brep / ON_Surface / ON_Extrusion / ON_Polysurface
+//                      → iso-parametric grid sampling of the surface(s)
+//                        (trim curves are ignored — a renderable approximation
+//                        of the NURBS shape)
+// File units are read from the 3dm unit-system setting and carried through
+// ModelData.unitToMM so the ruler / size tools report correct mm.
+namespace {
+float onUnitsToMM(ON::LengthUnitSystem us) {
+    switch (us) {
+        case ON::LengthUnitSystem::Nanometers:      return 0.000001f;
+        case ON::LengthUnitSystem::Microns:         return 0.001f;
+        case ON::LengthUnitSystem::Millimeters:     return 1.0f;
+        case ON::LengthUnitSystem::Centimeters:     return 10.0f;
+        case ON::LengthUnitSystem::Decimeters:      return 100.0f;
+        case ON::LengthUnitSystem::Meters:          return 1000.0f;
+        case ON::LengthUnitSystem::Dekameters:      return 10000.0f;
+        case ON::LengthUnitSystem::Hectometers:     return 100000.0f;
+        case ON::LengthUnitSystem::Kilometers:      return 1000000.0f;
+        case ON::LengthUnitSystem::Microinches:     return 0.0254f;
+        case ON::LengthUnitSystem::Mils:            return 0.0254f;
+        case ON::LengthUnitSystem::Inches:          return 25.4f;
+        case ON::LengthUnitSystem::Feet:            return 304.8f;
+        case ON::LengthUnitSystem::Yards:           return 914.4f;
+        case ON::LengthUnitSystem::Miles:           return 1609344.0f;
+        default:                                    return 1.0f;
+    }
+}
+
+// Sample one surface over its UV domain into the output arrays.
+// The grid density adapts to the surface size relative to the model: larger
+// surfaces get more segments (clamped to a sane range for phones).
+void tessellateSurface(const ON_Surface* surf, float modelDiag,
+                       std::vector<Vertex>& verts, std::vector<unsigned int>& idx) {
+    if (!surf || !surf->IsValid()) return;
+    const ON_Interval du = surf->Domain(0);
+    const ON_Interval dv = surf->Domain(1);
+    if (!du.IsIncreasing() || !dv.IsIncreasing()) return;
+
+    // Diagonal of this surface's bbox in file units
+    ON_BoundingBox bb;
+    surf->GetBoundingBox(bb, true);
+    float sDiag = (float)bb.Diagonal().Length();
+    float denom = modelDiag > 1e-6f ? modelDiag : 1.0f;
+    int segs = (int)(4 + 44.0f * (sDiag / denom));
+    if (segs < 4)  segs = 4;
+    if (segs > 64) segs = 64;
+
+    const unsigned int base = (unsigned int)verts.size();
+    const int uN = segs + 1, vN = segs + 1;
+    std::vector<float> grid((size_t)uN * vN * 3);
+    for (int j = 0; j < vN; ++j) {
+        double v = dv.ParameterAt((double)j / (double)segs);
+        for (int i = 0; i < uN; ++i) {
+            double u = du.ParameterAt((double)i / (double)segs);
+            ON_3dPoint p = surf->PointAt(u, v);
+            size_t o = (size_t)(j * uN + i) * 3;
+            grid[o+0] = (float)p.x; grid[o+1] = (float)p.y; grid[o+2] = (float)p.z;
+        }
+    }
+    for (int j = 0; j < vN; ++j) {
+        for (int i = 0; i < uN; ++i) {
+            Vertex v{};
+            size_t o = (size_t)(j * uN + i) * 3;
+            v.px = grid[o+0]; v.py = grid[o+1]; v.pz = grid[o+2];
+            verts.push_back(v);
+        }
+    }
+    for (int j = 0; j < segs; ++j) {
+        for (int i = 0; i < segs; ++i) {
+            unsigned int a = base + (unsigned int)(j * uN + i);
+            unsigned int b = base + (unsigned int)(j * uN + i + 1);
+            unsigned int c = base + (unsigned int)((j+1) * uN + i + 1);
+            unsigned int d = base + (unsigned int)((j+1) * uN + i);
+            idx.push_back(a); idx.push_back(b); idx.push_back(c);
+            idx.push_back(a); idx.push_back(c); idx.push_back(d);
+        }
+    }
+}
+
+// Extract a mesh-like object as raw triangles. Returns number of triangles added.
+void addOnMesh(const ON_Mesh* m, std::vector<Vertex>& verts,
+               std::vector<unsigned int>& idx) {
+    if (!m || m->m_V.Count() == 0) return;
+    const unsigned int base = (unsigned int)verts.size();
+    for (int i = 0; i < m->m_V.Count(); ++i) {
+        const ON_3fPoint& p = m->m_V[i];
+        Vertex v{};
+        v.px = p.x; v.py = p.y; v.pz = p.z;
+        if (m->m_N.Count() == m->m_V.Count()) {
+            const ON_3fVector& n = m->m_N[i];
+            v.nx = n.x; v.ny = n.y; v.nz = n.z;
+        }
+        verts.push_back(v);
+    }
+    for (int f = 0; f < m->m_F.Count(); ++f) {
+        const ON_MeshFace& mf = m->m_F[f];
+        if (mf.vi[0] < 0 || mf.vi[1] < 0 || mf.vi[2] < 0) continue;
+        idx.push_back(base + (unsigned int)mf.vi[0]);
+        idx.push_back(base + (unsigned int)mf.vi[1]);
+        idx.push_back(base + (unsigned int)mf.vi[2]);
+        if (mf.vi[3] != mf.vi[2] && mf.vi[3] >= 0) {   // quad → second triangle
+            idx.push_back(base + (unsigned int)mf.vi[0]);
+            idx.push_back(base + (unsigned int)mf.vi[2]);
+            idx.push_back(base + (unsigned int)mf.vi[3]);
+        }
+    }
+}
+}  // namespace
+
+bool ModelLoader::load3DM(const std::string& path, ModelData& data) {
+    ONX_Model model;
+    if (!model.Read(path.c_str())) {
+        LOGE("3DM: openNURBS failed to read %s", path.c_str());
+        return false;
+    }
+
+    // Units: 3dm carries a document unit system → mm conversion
+    data.unitToMM = onUnitsToMM(model.m_settings.m_ModelUnitsAndTolerances.m_unit_system);
+    data.hasNormals = false;
+
+    // Model bbox diagonal (file units) to scale tessellation density
+    float modelDiag = 1.0f;
+    ON_BoundingBox mbb = model.ModelGeometryBoundingBox();
+    if (mbb.IsValid()) modelDiag = (float)mbb.Diagonal().Length();
+    if (!(modelDiag > 1e-6f)) modelDiag = 1.0f;
+
+    int geomCount = 0;
+    ONX_ModelComponentIterator it(model, ON_ModelComponent::Type::ModelGeometry);
+    for (ON_ModelComponentReference ref = it.FirstComponentReference();
+         !ref.IsEmpty();
+         ref = it.NextComponentReference()) {
+        const ON_ModelComponent* mc = ref.ModelComponent();
+        if (!mc) continue;
+        const ON_ModelGeometryComponent* mgc = dynamic_cast<const ON_ModelGeometryComponent*>(mc);
+        if (!mgc) continue;
+        // Second arg = value returned when the component has no geometry.
+        const ON_Geometry* geo = mgc->Geometry(nullptr);
+        if (!geo) continue;
+
+        if (const ON_Mesh* m = ON_Mesh::Cast(geo)) {
+            addOnMesh(m, data.vertices, data.indices);
+        } else if (const ON_Brep* brep = ON_Brep::Cast(geo)) {
+            for (int fi = 0; fi < brep->m_F.Count(); ++fi) {
+                const ON_BrepFace& face = brep->m_F[fi];
+                tessellateSurface(&face, modelDiag, data.vertices, data.indices);
+            }
+        } else if (const ON_Surface* surf = ON_Surface::Cast(geo)) {
+            // Also covers ON_Polysurface and ON_Extrusion (both derive ON_Surface)
+            tessellateSurface(surf, modelDiag, data.vertices, data.indices);
+        }
+        ++geomCount;
+    }
+
+    if (data.vertices.empty() || data.indices.empty()) {
+        LOGE("3DM: no mesh/surface geometry found in %s", path.c_str());
+        return false;
+    }
+    LOGI("3DM: read %d geometry objects | %.1f×%.1f×%.1f mm (unitToMM=%.4f)",
+         geomCount, data.widthMM(), data.heightMM(), data.depthMM(), data.unitToMM);
+    return true;
 }
 
 // ── Flat normals ─────────────────────────────────────────────────────────────

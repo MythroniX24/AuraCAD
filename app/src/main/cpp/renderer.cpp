@@ -1,4 +1,7 @@
 #include "renderer.h"
+
+// Rhino 3DM (openNURBS) — ONX_Model / ON_Mesh used by export3DM().
+#include "opennurbs.h"
 static inline Vec3 applyMat4Point(const Mat4& mat, float x, float y, float z);
 static inline Vec3 applyMat4Normal(const Mat4& mat, float x, float y, float z);
 #include "mesh_separator.h"
@@ -1183,6 +1186,52 @@ bool Renderer::exportPLY(const std::string& path) const {
         base += mo.vertices.size();
     }
     return true;
+}
+
+// ── 3DM export (openNURBS) ───────────────────────────────────────────────────
+// Writes the current scene as Rhino 3DM v6. Every visible mesh becomes an
+// ON_Mesh object in document units of millimetres. The same global × mesh
+// × mm conversion used by the OBJ/STL/PLY exporters keeps the file true to
+// the on-screen size.
+bool Renderer::export3DM(const std::string& path) const {
+    bool anyMesh = false;
+    for (const auto& mo : m_meshes) if (mo.visible) { anyMesh = true; break; }
+    if (!anyMesh) return false;
+
+    ONX_Model model;
+    model.m_settings.m_ModelUnitsAndTolerances.m_unit_system =
+        ON::LengthUnitSystem::Millimeters;
+
+    Mat4 global = buildGlobalMatrix();
+    float toMM = mmPerUnit();
+    Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
+
+    for (const auto& mo : m_meshes) {
+        if (!mo.visible) continue;
+        Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
+
+        ON_Mesh mesh;
+        for (const auto& v : mo.vertices) {
+            Vec3 p = applyMat4Point(mtx, v.px, v.py, v.pz);
+            ON_3fPoint fp; fp.x = (float)p.x; fp.y = (float)p.y; fp.z = (float)p.z;
+            mesh.m_V.Append(fp);
+        }
+        for (size_t i = 0; i + 2 < mo.indices.size(); i += 3) {
+            ON_MeshFace f;
+            f.vi[0] = (int)mo.indices[i+0];
+            f.vi[1] = (int)mo.indices[i+1];
+            f.vi[2] = (int)mo.indices[i+2];
+            f.vi[3] = f.vi[2];   // triangle
+            mesh.m_F.Append(f);
+        }
+        if (mesh.m_F.Count() == 0 || mesh.m_V.Count() == 0) continue;
+        mesh.ComputeVertexNormals();
+        // Model takes ownership (bManageGeometry=true) and deletes the mesh.
+        ON_Mesh* managed = new ON_Mesh(mesh);
+        model.AddModelGeometryComponentForExperts(true, managed, false, nullptr, false);
+    }
+
+    return model.Write(path.c_str(), 6);
 }
 
 // ── Combine meshes ───────────────────────────────────────────────────────────

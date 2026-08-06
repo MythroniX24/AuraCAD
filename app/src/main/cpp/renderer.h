@@ -206,6 +206,9 @@ public:
     bool exportOBJ(const std::string& path) const;
     bool exportSTL(const std::string& path) const;
     bool exportPLY(const std::string& path) const;
+    /** Rhino 3DM (openNURBS) — writes every visible mesh as an ON_Mesh in
+     *  document units = millimetres, v6 format (Rhino 6/7/8 + others). */
+    bool export3DM(const std::string& path) const;
 
     /** Merge [indices] meshes into a single mesh (originals removed). */
     bool combineMeshes(const std::vector<int>& indices);
