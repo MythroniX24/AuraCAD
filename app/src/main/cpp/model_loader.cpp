@@ -531,27 +531,6 @@ bool ModelLoader::load3DS(const std::string& path, ModelData& data){
 // File units are read from the 3dm unit-system setting and carried through
 // ModelData.unitToMM so the ruler / size tools report correct mm.
 namespace {
-float onUnitsToMM(ON::LengthUnitSystem us) {
-    switch (us) {
-        case ON::LengthUnitSystem::Nanometers:      return 0.000001f;
-        case ON::LengthUnitSystem::Microns:         return 0.001f;
-        case ON::LengthUnitSystem::Millimeters:     return 1.0f;
-        case ON::LengthUnitSystem::Centimeters:     return 10.0f;
-        case ON::LengthUnitSystem::Decimeters:      return 100.0f;
-        case ON::LengthUnitSystem::Meters:          return 1000.0f;
-        case ON::LengthUnitSystem::Dekameters:      return 10000.0f;
-        case ON::LengthUnitSystem::Hectometers:     return 100000.0f;
-        case ON::LengthUnitSystem::Kilometers:      return 1000000.0f;
-        case ON::LengthUnitSystem::Microinches:     return 0.0254f;
-        case ON::LengthUnitSystem::Mils:            return 0.0254f;
-        case ON::LengthUnitSystem::Inches:          return 25.4f;
-        case ON::LengthUnitSystem::Feet:            return 304.8f;
-        case ON::LengthUnitSystem::Yards:           return 914.4f;
-        case ON::LengthUnitSystem::Miles:           return 1609344.0f;
-        default:                                    return 1.0f;
-    }
-}
-
 // Sample one surface over its UV domain into the output arrays.
 // The grid density adapts to the surface size relative to the model: larger
 // surfaces get more segments (clamped to a sane range for phones).
@@ -640,8 +619,12 @@ bool ModelLoader::load3DM(const std::string& path, ModelData& data) {
         return false;
     }
 
-    // Units: 3dm carries a document unit system → mm conversion
-    data.unitToMM = onUnitsToMM(model.m_settings.m_ModelUnitsAndTolerances.m_unit_system);
+    // Units: 3dm carries a document unit system → mm conversion.
+    // Scale(mm) = value of 1 mm in the document's unit system, so
+    // mm per document unit = 1 / Scale(mm). Handles custom unit scales too.
+    const ON_3dmUnitsAndTolerances& ut = model.m_settings.m_ModelUnitsAndTolerances;
+    const double mmScale = ut.Scale(ON::LengthUnitSystem::Millimeters);
+    data.unitToMM = (mmScale > 1e-9) ? (float)(1.0 / mmScale) : 1.0f;
     data.hasNormals = false;
 
     // Model bbox diagonal (file units) to scale tessellation density
