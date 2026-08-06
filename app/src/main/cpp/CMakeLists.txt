@@ -33,7 +33,10 @@ FetchContent_Declare(
     # which only exist since API 29. We build with ANDROID_PLATFORM=android-24,
     # so the patch guards that code with __ANDROID_API__ >= 29 and stubs it
     # otherwise (font faces aren't needed by this app).
-    PATCH_COMMAND git apply ${CMAKE_CURRENT_SOURCE_DIR}/opennurbs_android_font.patch
+    # Idempotent: CI caches app/.cxx (incl. _deps/opennurbs-src), so the
+    # checkout may already have the patch applied. Reverse-check first and
+    # only apply when needed — keeps `git apply` from failing on re-runs.
+    PATCH_COMMAND sh -c "if git apply --reverse --check ${CMAKE_CURRENT_SOURCE_DIR}/opennurbs_android_font.patch 2>/dev/null; then echo opennurbs-patch-already-applied; else git apply ${CMAKE_CURRENT_SOURCE_DIR}/opennurbs_android_font.patch; fi"
 )
 
 FetchContent_MakeAvailable(tinyobjloader tinygltf opennurbs)
