@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Uploaded AuraCAD launcher background; intentionally opaque for adaptive masks. -->
+    <color name="aura_launcher_background">#080054</color>
+
     <color name="bg_deepest">#06060B</color>
     <color name="bg_dark">#0F0F18</color>
     <color name="bg_medium">#161622</color>
