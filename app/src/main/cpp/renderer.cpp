@@ -2858,12 +2858,14 @@ std::vector<uint8_t> Renderer::takeScreenshot(){
     return p;
 }
 
-// Close-up AI inspection shot of the analyzed ring. The camera is temporarily
-// aimed at the ring centre and fitted so the ring fills the frame; dimension
-// callouts are drawn in world space (red = inner diameter, cyan = band width,
-// green = height) plus a white bar that is EXACTLY 10 mm, giving the vision
-// model a real pixel→mm calibration. Camera + overlay state are restored.
-std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx){
+// Close-up AI inspection shots of the analyzed ring for multi-angle vision.
+// view 0 = TOP: the camera looks along the ring axis so the inner diameter
+// across the opening is seen; view 1 = SIDE: the camera looks edge-on so the
+// height and band profile are visible. Both frames carry world-space callouts
+// (red = inner diameter, cyan = band width, green = height) plus a white bar
+// that is EXACTLY 10 mm, giving the vision model a real pixel→mm calibration.
+// Camera + overlay state are restored after each shot.
+std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx, int view){
     if(meshIdx<0 || meshIdx>=(int)m_meshes.size() || !m_ring.valid || m_ring.meshIdx!=meshIdx)
         return {};
     const MeshObject& mo = m_meshes[meshIdx];
@@ -2875,7 +2877,7 @@ std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx){
     const int   saveGizmo=m_gizmoMode;
     const bool  saveR1=m_rulerHasP1, saveR2=m_rulerHasP2;
 
-    // ── World-space bounds of the ring mesh ──────────────────────────────────
+    // ── World-space bounds of the ring mesh (drives the fit distance) ────────
     Mat4 global = buildGlobalMatrix();
     Mat4 model  = global * buildMeshMatrix(mo);
     float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX,mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
@@ -2886,20 +2888,10 @@ std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx){
         mnZ=std::min(mnZ,p.z); mxZ=std::max(mxZ,p.z);
     }
     if(mxX<=mnX||mxY<=mnY||mxZ<=mnZ) return {};
-    const float cx=0.5f*(mnX+mxX), cy=0.5f*(mnY+mxY), cz=0.5f*(mnZ+mxZ);
     const float radius=0.5f*std::sqrt((mxX-mnX)*(mxX-mnX)+(mxY-mnY)*(mxY-mnY)+(mxZ-mnZ)*(mxZ-mnZ));
     if(radius<1e-6f) return {};
 
-    // ── Fit camera: same viewing angle as resetCamera, ring fills ~60% ──────
-    m_camYaw=0.4f; m_camPitch=0.3f;
-    m_panX=cx; m_panY=cy;
-    m_camDist=2.0f*radius/std::tan(60.0f*0.5f*DEG2RAD)*0.6f;
-    if(m_camDist<0.01f) m_camDist=0.01f;
-    m_gizmoMode=0; m_rulerHasP1=false; m_rulerHasP2=false;
-
-    // Render the fitted view, then draw the callouts on top.
-    draw();
-
+    // ── World-space ring frame: centre, axis, two in-plane basis vectors ─────
     Vec3 cW=applyMat4Point(model, m_ring.center.x, m_ring.center.y, m_ring.center.z);
     Vec3 aW=(applyMat4Point(model, m_ring.center.x+m_ring.axis.x,
                             m_ring.center.y+m_ring.axis.y,
@@ -2923,10 +2915,45 @@ std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx){
     float oRN=m_ring.currentOuterR>0.f?m_ring.currentOuterR:m_ring.outerR;
     float hN =m_ring.currentHeight>0.f?m_ring.currentHeight:m_ring.heightAx;
     float iR=iRN*scaleU, oR=oRN*scaleU, hh=hN*scaleA*0.5f;
+    float barWorld = 10.0f*scaleU/std::max(mmPerUnit(),1e-6f); // 10 mm bar, world units
 
-    // World length of a 10 mm bar (app mm semantics: 1 norm unit = mmPerUnit mm).
-    float barWorld = 10.0f*scaleU/std::max(mmPerUnit(),1e-6f);
-    Vec3 barC = cW - v*oR*1.4f;   // below the ring along the second in-plane axis
+    // ── Fit camera to the ring centre ────────────────────────────────────────
+    m_panX=cW.x; m_panY=cW.y;
+    m_camDist=2.0f*radius/std::tan(60.0f*0.5f*DEG2RAD)*0.6f;   // ring fills ~60%
+    if(m_camDist<0.01f) m_camDist=0.01f;
+    // Aim the fixed-up camera so the view direction (eye→target) equals d.
+    // Pitch is capped just short of ±90° so up=(0,1,0) never goes parallel to
+    // the view direction (that would make lookAt degenerate for a top view).
+    auto aimAt=[&](const Vec3& d){
+        if(d.y>=0.9999f){ m_camPitch=-PI*0.5f+0.15f; m_camYaw=0.f; }
+        else if(d.y<=-0.9999f){ m_camPitch=PI*0.5f-0.15f; m_camYaw=0.f; }
+        else { m_camPitch=asinf(-d.y); m_camYaw=atan2f(-d.x,-d.z); }
+    };
+    Vec3 viewDir;
+    if(view==1){ // SIDE: look edge-on along an in-plane axis (never world-up)
+        Vec3 cands[4]={u, Vec3{-u.x,-u.y,-u.z}, v, Vec3{-v.x,-v.y,-v.z}};
+        float bestScore=-1.f;
+        for(int i=0;i<4;i++){
+            const float dy=fabsf(cands[i].y);
+            if(dy>0.999f) continue;         // degenerate with fixed up=(0,1,0)
+            const float score=1.f-dy;       // prefer a level camera
+            if(score>bestScore){ bestScore=score; viewDir=cands[i]; }
+        }
+        if(bestScore<0.f) viewDir=u;        // safety fallback
+    } else {        // TOP: look along the ring axis (eye above the ring)
+        viewDir = (aW.y>0.f) ? Vec3{-aW.x,-aW.y,-aW.z} : aW;
+    }
+    aimAt(viewDir);
+    m_gizmoMode=0; m_rulerHasP1=false; m_rulerHasP2=false;
+
+    // Render the fitted view, then draw the callouts on top.
+    draw();
+
+    // Per-view callout axis: red/cyan lines must lie perpendicular to the view
+    // direction or they vanish (seen end-on). Height stays along the ring axis.
+    Vec3 dia=u;                             // TOP: u crosses the opening
+    if(view==1 && fabsf(viewDir.dot(u)) >= fabsf(viewDir.dot(v))) dia=v;
+    Vec3 barC = cW - dia*(oR*1.5f);         // beside the ring, in the clear
 
     Mat4 proj=Mat4::perspective(60.0f*DEG2RAD,(float)m_width/std::max(m_height,1),0.01f,100.0f);
     Vec3 eye=cameraEye();
@@ -2949,10 +2976,10 @@ std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx){
         glEnable(GL_DEPTH_TEST);
     };
 
-    line(cW-u*iR, cW+u*iR, 1.0f,0.25f,0.25f, 3.0f);          // red: inner diameter
-    line(cW+u*iR, cW+u*oR, 0.2f,0.85f,1.0f, 3.0f);            // cyan: band width
-    line(cW-aW*hh, cW+aW*hh, 0.3f,1.0f,0.45f, 3.0f);          // green: height (along ring axis)
-    line(barC-u*(barWorld*0.5f), barC+u*(barWorld*0.5f), 1.0f,1.0f,1.0f, 4.0f); // white: 10 mm
+    line(cW-dia*iR, cW+dia*iR, 1.0f,0.25f,0.25f, 3.0f);          // red: inner diameter
+    line(cW+dia*iR, cW+dia*oR, 0.2f,0.85f,1.0f, 3.0f);           // cyan: band width
+    line(cW-aW*hh, cW+aW*hh, 0.3f,1.0f,0.45f, 3.0f);             // green: height (along axis)
+    line(barC-dia*(barWorld*0.5f), barC+dia*(barWorld*0.5f), 1.0f,1.0f,1.0f, 4.0f); // white: 10 mm
     glLineWidth(1.0f);
 
     std::vector<uint8_t> p((size_t)m_width*m_height*4);

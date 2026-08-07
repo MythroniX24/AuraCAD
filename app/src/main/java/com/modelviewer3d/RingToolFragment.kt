@@ -648,7 +648,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         }
 
         aiButton?.isEnabled = false
-        setAiStatus("Inspecting the ring preview and preparing measurements…", "#FFD54F")
+        setAiStatus("Capturing calibrated top + side ring views…", "#FFD54F")
         lifecycleScope.launch {
             try {
                 if (!ringAnalyzed) {
@@ -680,8 +680,16 @@ class RingToolFragment : BottomSheetDialogFragment() {
                     throw IllegalArgumentException(
                         "Target must be between %.2f and %.2f mm for this ring.".format(idMin, idMax))
                 }
-                val image = withContext(Dispatchers.IO) { captureRingInspectionBase64() }
-                if (image.isNullOrBlank()) throw IllegalStateException("Could not capture the ring preview")
+                // Multi-angle vision: capture the calibrated TOP view (diameter)
+                // plus the SIDE view (height/band) so Gemini can cross-check.
+                // The side image is only sent when it is a real inspection shot,
+                // so a failed capture can't send two identical fallback images.
+                val topImage = withContext(Dispatchers.IO) {
+                    captureRingInspectionBase64(0) ?: capturePreviewBase64()
+                }
+                if (topImage.isNullOrBlank()) throw IllegalStateException("Could not capture the ring preview")
+                val sideImage = withContext(Dispatchers.IO) { captureRingInspectionBase64(1) }
+                val images = listOfNotNull(topImage, sideImage)
 
                 // Up to 2 attempts: on invalid/unsafe output, retry once with
                 // the exact rejection reason so Gemini can correct itself.
@@ -695,9 +703,10 @@ class RingToolFragment : BottomSheetDialogFragment() {
                     val prompt = aiFitPrompt(target, feedback)
                     val reply = GeminiClient.generate(
                         apiKey = key,
-                        systemPrompt = "You are AuraCAD's precise jewelry fitting assistant. The image is a calibrated close-up: the WHITE bar is exactly 10 mm — use it to convert pixels to mm. Cross-check the RED (inner diameter), CYAN (band width) and GREEN (height) callouts against the scale bar and the reported native measurements. Never invent unsafe geometry. Return only the requested JSON.",
+                        systemPrompt = "You are AuraCAD's precise jewelry fitting assistant. Image 1 is a TOP view looking down the ring axis (RED line = inner diameter, CYAN line = band width, WHITE bar = 10 mm). Image 2 is a SIDE view, edge-on (GREEN line = height along the axis, CYAN line = band width, WHITE bar = 10 mm). Use the WHITE bars to convert pixels to mm. Cross-check both views and the reported native measurements, then choose manufacturable values. Never invent unsafe geometry. Return only the requested JSON.",
                         userPrompt = prompt,
-                        pngBase64 = image,
+                        pngBase64 = images.firstOrNull(),
+                        extraImages = images.drop(1),
                         model = AiPrefs.model(ctx)
                     )
                     replyModel = reply.model
@@ -765,15 +774,16 @@ class RingToolFragment : BottomSheetDialogFragment() {
         val measuredInner: Float
     )
 
-    /** Builds the AI prompt with the measured geometry + overlay legend. */
+    /** Builds the AI prompt with the measured geometry + both-view legend. */
     private fun aiFitPrompt(target: Float, feedback: String): String {
         val currentUs = RingMath.usSizeLabel(origInnerDiaMM)
         return """
-            Analyze this AuraCAD ring close-up. A WHITE bar in the image is EXACTLY 10 mm — use it as the pixel-to-mm scale.
-            Overlay callouts in the image: RED line = current inner diameter, CYAN line = band width, GREEN line = height.
+            You get TWO calibrated AuraCAD ring images from different angles. In BOTH images a WHITE bar is EXACTLY 10 mm — use it as the pixel-to-mm scale.
+            Image 1 (TOP view, looking down the ring axis): RED line = current inner diameter across the opening, CYAN line = band width, WHITE bar = 10 mm.
+            Image 2 (SIDE view, edge-on): GREEN line = ring height along its axis, CYAN line = band width, WHITE bar = 10 mm.
             The user wants the ring resized to an inner diameter of $target mm (≈ ${RingMath.usSizeLabel(target)}).
             Current native measurements: innerDiameter=${origInnerDiaMM} mm ($currentUs), bandWidth=${origBandWidthMM} mm, height=${origHeightMM} mm.
-            Visually measure the CURRENT inner diameter from the image and report it in measuredInnerDiameterMM.
+            Visually measure the CURRENT inner diameter from Image 1 and report it in measuredInnerDiameterMM; cross-check the height against Image 2.
             Then choose safe manufacturable target values: innerDiameterMM close to $target, bandWidthMM and heightMM sane for a ring (band 0.5–6 mm, height 0.5–20 mm).
             JSON schema exactly:
             {"innerDiameterMM": number, "bandWidthMM": number, "heightMM": number, "measuredInnerDiameterMM": number, "reason": "short explanation"}
@@ -862,23 +872,24 @@ class RingToolFragment : BottomSheetDialogFragment() {
     }
 
     /**
-     * Captures the calibrated close-up (camera auto-fitted to the ring, dimension
-     * callouts + 10 mm scale bar). Falls back to the plain full-view screenshot
-     * when the ring isn't analyzed yet.
+     * Captures one calibrated close-up of the analyzed ring (camera auto-fitted,
+     * dimension callouts + 10 mm scale bar). [view] selects the angle: 0 = top
+     * (diameter), 1 = side (height/band). Returns null when the shot fails —
+     * the caller decides whether a plain full-view screenshot is acceptable.
      */
-    private suspend fun captureRingInspectionBase64(): String? {
+    private suspend fun captureRingInspectionBase64(view: Int): String? {
         val host = activity as? MainActivity ?: return null
         val w = host.glView.width; val h = host.glView.height
         if (w <= 0 || h <= 0) return null
         var rgba: ByteArray? = null
         val latch = CountDownLatch(1)
         host.glView.queueEvent {
-            try { rgba = NativeLib.nativeTakeRingInspectionShot(targetMeshIdx) } catch (_: Exception) {}
+            try { rgba = NativeLib.nativeTakeRingInspectionShot(targetMeshIdx, view) } catch (_: Exception) {}
             latch.countDown()
         }
         withContext(Dispatchers.IO) { latch.await() }
-        val bytes = rgba ?: return capturePreviewBase64()
-        if (bytes.size < w * h * 4) return capturePreviewBase64()
+        val bytes = rgba ?: return null
+        if (bytes.size < w * h * 4) return null
         return withContext(Dispatchers.Default) {
             val pixels = IntArray(w * h)
             for (i in pixels.indices) {

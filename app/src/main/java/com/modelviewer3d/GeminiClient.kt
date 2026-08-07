@@ -73,6 +73,7 @@ object GeminiClient {
         systemPrompt: String,
         userPrompt: String,
         pngBase64: String? = null,
+        extraImages: List<String> = emptyList(),
         model: String = DEFAULT_MODEL
     ): GeminiReply {
         val cleanKey = sanitizeApiKey(apiKey)
@@ -84,7 +85,8 @@ object GeminiClient {
         for (m in tryOrder) {
             lastTried = m
             try {
-                return GeminiReply(m, post(m, cleanKey, systemPrompt, userPrompt, pngBase64))
+                return GeminiReply(
+                    m, post(m, cleanKey, systemPrompt, userPrompt, pngBase64, extraImages))
             } catch (e: GeminiException) {
                 if (e.modelUnavailable) continue // model retired → try the next one
                 throw e                          // key/rate-limit/network → surface it
@@ -101,14 +103,20 @@ object GeminiClient {
         cleanKey: String,
         systemPrompt: String,
         userPrompt: String,
-        pngBase64: String?
+        pngBase64: String?,
+        extraImages: List<String>
     ): String? = withContext(Dispatchers.IO) {
         val parts = JSONArray().put(JSONObject().put("text", userPrompt))
-        if (!pngBase64.isNullOrBlank()) {
+        // Gemini vision accepts several inlineData parts — the first image is
+        // the primary (top) view and any extras follow (e.g. the side view).
+        fun addImage(b64: String?) {
+            if (b64.isNullOrBlank()) return
             parts.put(JSONObject().put("inlineData", JSONObject()
                 .put("mimeType", "image/png")
-                .put("data", pngBase64)))
+                .put("data", b64)))
         }
+        addImage(pngBase64)
+        extraImages.forEach { addImage(it) }
         val body = JSONObject()
             .put("systemInstruction", JSONObject()
                 .put("parts", JSONArray().put(JSONObject().put("text", systemPrompt))))

@@ -457,12 +457,12 @@ JNIEXPORT jbyteArray JNICALL Java_com_modelviewer3d_NativeLib_nativeTakeScreensh
 
 // Close-up AI inspection shot of the analyzed ring (fitted camera + dimension
 // callouts + 10 mm scale bar). GL thread. Returns null when not analyzed.
-JNIEXPORT jbyteArray JNICALL Java_com_modelviewer3d_NativeLib_nativeTakeRingInspectionShot(JNIEnv* env,jclass,jint meshIdx){
+JNIEXPORT jbyteArray JNICALL Java_com_modelviewer3d_NativeLib_nativeTakeRingInspectionShot(JNIEnv* env,jclass,jint meshIdx,jint view){
     std::vector<uint8_t> px;
     {
         LOCK_RENDERER();
         if(!g_renderer) return nullptr;
-        px = g_renderer->takeRingInspectionShot((int)meshIdx);
+        px = g_renderer->takeRingInspectionShot((int)meshIdx,(int)view);
     }
     if(px.empty()) return nullptr;
     jbyteArray arr=env->NewByteArray((jsize)px.size());

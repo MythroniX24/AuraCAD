@@ -114,7 +114,7 @@ object NativeLib {
      *  ring mesh and dimension callouts (inner diameter / band / height) plus
      *  a 10 mm scale bar are drawn, so Gemini gets a calibrated close-up.
      *  Returns RGBA pixels or null when the ring isn't analyzed. GL thread. */
-    external fun nativeTakeRingInspectionShot(meshIdx: Int): ByteArray?
+    external fun nativeTakeRingInspectionShot(meshIdx: Int, view: Int): ByteArray?
 
     // ── Ring Deformation Tools ────────────────────────────────────────────────
     external fun nativeAnalyzeRing(meshIdx: Int): Boolean

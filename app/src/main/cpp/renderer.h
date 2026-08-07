@@ -255,9 +255,11 @@ public:
      *  auto-fits the ring mesh and dimension callouts are drawn in world space
      *  (red = inner diameter, cyan = band width, green = height) plus a white
      *  10 mm scale bar, so a vision model can calibrate pixels→mm. All camera
-     *  and overlay state is restored before returning. Empty when the ring is
-     *  not analyzed. GL thread only. */
-    std::vector<uint8_t> takeRingInspectionShot(int meshIdx);
+     *  and overlay state is restored before returning. [view] selects the camera
+     *  angle: 0 = top (along the ring axis, diameter visible), 1 = side
+     *  (edge-on, height/band visible). Empty when the ring is not analyzed.
+     *  GL thread only. */
+    std::vector<uint8_t> takeRingInspectionShot(int meshIdx, int view);
     float getFPS() const { return m_fps; }
     TransformState getTransform() const;
 
