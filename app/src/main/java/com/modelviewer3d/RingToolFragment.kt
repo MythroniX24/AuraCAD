@@ -680,37 +680,42 @@ class RingToolFragment : BottomSheetDialogFragment() {
                     throw IllegalArgumentException(
                         "Target must be between %.2f and %.2f mm for this ring.".format(idMin, idMax))
                 }
-                val image = withContext(Dispatchers.IO) { capturePreviewBase64() }
-                if (image.isNullOrBlank()) throw IllegalStateException("Could not capture the model preview")
-                val prompt = """
-                    Analyze this AuraCAD ring preview and return ONLY valid JSON.
-                    The user wants inner diameter $target mm.
-                    Current measured geometry: innerDiameter=${origInnerDiaMM} mm,
-                    bandWidth=${origBandWidthMM} mm, height=${origHeightMM} mm.
-                    Choose safe manufacturable values while preserving the ring shape.
-                    JSON schema exactly:
-                    {"innerDiameterMM": number, "bandWidthMM": number, "heightMM": number, "reason": "short explanation"}
-                    Do not include markdown or extra keys. Keep band width and height positive.
-                """.trimIndent()
-                val reply = GeminiClient.generate(
-                    apiKey = key,
-                    systemPrompt = "You are AuraCAD's precise jewelry fitting assistant. Use the image as visual context, but never invent unsafe geometry. Return only the requested JSON.",
-                    userPrompt = prompt,
-                    pngBase64 = image,
-                    model = AiPrefs.model(ctx)
-                )
-                val json = parseAiFit(reply.text)
-                val aiId = json.getDouble("innerDiameterMM").toFloat()
-                val aiBw = json.getDouble("bandWidthMM").toFloat()
-                val aiH = json.getDouble("heightMM").toFloat()
-                val reason = json.optString("reason", "Fit applied")
-                if (!aiId.isFinite() || !aiBw.isFinite() || !aiH.isFinite() ||
-                    aiId <= 0f || aiBw <= 0f || aiH <= 0f) {
-                    throw IllegalArgumentException("Gemini returned invalid measurements")
+                val image = withContext(Dispatchers.IO) { captureRingInspectionBase64() }
+                if (image.isNullOrBlank()) throw IllegalStateException("Could not capture the ring preview")
+
+                // Up to 2 attempts: on invalid/unsafe output, retry once with
+                // the exact rejection reason so Gemini can correct itself.
+                var fit: AiFitResult? = null
+                var lastReason = ""
+                var replyModel = ""
+                for (attempt in 0 until 2) {
+                    val feedback = if (attempt > 0 && lastReason.isNotBlank()) {
+                        "\nYour previous output was rejected: $lastReason. Return corrected values."
+                    } else ""
+                    val prompt = aiFitPrompt(target, feedback)
+                    val reply = GeminiClient.generate(
+                        apiKey = key,
+                        systemPrompt = "You are AuraCAD's precise jewelry fitting assistant. The image is a calibrated close-up: the WHITE bar is exactly 10 mm — use it to convert pixels to mm. Cross-check the RED (inner diameter), CYAN (band width) and GREEN (height) callouts against the scale bar and the reported native measurements. Never invent unsafe geometry. Return only the requested JSON.",
+                        userPrompt = prompt,
+                        pngBase64 = image,
+                        model = AiPrefs.model(ctx)
+                    )
+                    replyModel = reply.model
+                    val json = parseAiFit(reply.text)
+                    val candidate = validateAiFit(json, target)
+                    if (candidate == null) {
+                        lastReason = aiRejectReason(json)
+                        continue
+                    }
+                    fit = candidate
+                    lastReason = json.optString("reason", "Fit applied")
+                    break
                 }
-                val safeId = aiId.coerceIn(idMin, idMax)
-                val safeBw = aiBw.coerceIn(bwMin, bwMax)
-                val safeH = aiH.coerceIn(hMin, hMax)
+                val f = fit ?: throw IllegalArgumentException("Gemini measurements rejected twice ($lastReason)")
+
+                val safeId = f.innerId.coerceIn(idMin, idMax)
+                val safeBw = f.band.coerceIn(bwMin, bwMax)
+                val safeH = f.height.coerceIn(hMin, hMax)
                 // Apply all three values atomically in ONE native call (a single
                 // undo snapshot). Proportional mode is suspended so the setters
                 // don't recalculate each other's dimensions and drift the result.
@@ -728,7 +733,13 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 applyValue(safeH, "#A78BFA", fromUser = false)
                 proportional = wasProportional
                 activity?.runOnUiThread { updateInfo(); updatePreview() }
-                setAiStatus("✓ ${reply.model}: %.2f mm inner · %.2f mm band · %.2f mm height\n%s".format(safeId, safeBw, safeH, reason), "#4CAF82")
+                val usLabel = RingMath.usSizeLabel(safeId)
+                val measured = f.measuredInner.takeIf { it > 0f }
+                val check = if (measured != null && origInnerDiaMM > 0f) {
+                    val dev = (measured - origInnerDiaMM) / origInnerDiaMM * 100f
+                    " · AI saw ${measured}mm (±${"%.0f".format(kotlin.math.abs(dev))}%)"
+                } else ""
+                setAiStatus("✓ $replyModel: $usLabel · %.2f mm inner · %.2f mm band · %.2f mm height%s\n%s".format(safeId, safeBw, safeH, check, lastReason), "#4CAF82")
             } catch (e: GeminiClient.GeminiException) {
                 setAiStatus("Gemini: ${e.message}", "#FF7A72")
             } catch (e: Exception) {
@@ -744,6 +755,73 @@ class RingToolFragment : BottomSheetDialogFragment() {
         val start = text.indexOf('{'); val end = text.lastIndexOf('}')
         if (start < 0 || end <= start) throw IllegalArgumentException("Gemini did not return JSON")
         return JSONObject(text.substring(start, end + 1))
+    }
+
+    /** Validated Gemini ring-fit output. */
+    private data class AiFitResult(
+        val innerId: Float,
+        val band: Float,
+        val height: Float,
+        val measuredInner: Float
+    )
+
+    /** Builds the AI prompt with the measured geometry + overlay legend. */
+    private fun aiFitPrompt(target: Float, feedback: String): String {
+        val currentUs = RingMath.usSizeLabel(origInnerDiaMM)
+        return """
+            Analyze this AuraCAD ring close-up. A WHITE bar in the image is EXACTLY 10 mm — use it as the pixel-to-mm scale.
+            Overlay callouts in the image: RED line = current inner diameter, CYAN line = band width, GREEN line = height.
+            The user wants the ring resized to an inner diameter of $target mm (≈ ${RingMath.usSizeLabel(target)}).
+            Current native measurements: innerDiameter=${origInnerDiaMM} mm ($currentUs), bandWidth=${origBandWidthMM} mm, height=${origHeightMM} mm.
+            Visually measure the CURRENT inner diameter from the image and report it in measuredInnerDiameterMM.
+            Then choose safe manufacturable target values: innerDiameterMM close to $target, bandWidthMM and heightMM sane for a ring (band 0.5–6 mm, height 0.5–20 mm).
+            JSON schema exactly:
+            {"innerDiameterMM": number, "bandWidthMM": number, "heightMM": number, "measuredInnerDiameterMM": number, "reason": "short explanation"}
+            Do not include markdown or extra keys. Keep all values positive.$feedback
+        """.trimIndent()
+    }
+
+    /**
+     * Validates a parsed AI fit. Returns an [AiFitResult] when safe, or null
+     * when the values are missing/non-finite/physically impossible. The inner
+     * diameter is snapped to the nearest standard US size for manufacturability
+     * (kept inside the detected range).
+     */
+    private fun validateAiFit(json: JSONObject, target: Float): AiFitResult? {
+        val id = json.optDouble("innerDiameterMM", Double.NaN)
+        val bw = json.optDouble("bandWidthMM", Double.NaN)
+        val h  = json.optDouble("heightMM", Double.NaN)
+        val measured = json.optDouble("measuredInnerDiameterMM", Double.NaN)
+        if (!id.isFinite() || !bw.isFinite() || !h.isFinite()) return null
+        val fId = id.toFloat(); val fBw = bw.toFloat(); val fH = h.toFloat()
+        if (fId <= 0f || fBw <= 0f || fH <= 0f) return null
+        // Physical sanity — a real ring can't have these proportions.
+        if (fBw < 0.5f || fBw > 6f) return null
+        if (fH < 0.5f || fH > 20f) return null
+        if (fBw >= fId * 0.45f) return null
+        // The requested target must win — AI should land near it.
+        val snapped = RingMath.usSizeToDiam(RingMath.diamToUSSize(fId))
+        val finalId = if (kotlin.math.abs(snapped - fId) <= 0.3f) snapped else fId
+        if (finalId < idMin || finalId > idMax) return null
+        return AiFitResult(
+            innerId = finalId,
+            band = fBw,
+            height = fH,
+            measuredInner = if (measured.isFinite() && measured > 0) measured.toFloat() else -1f
+        )
+    }
+
+    /** Human-readable reason an AI fit was rejected (fed back on retry). */
+    private fun aiRejectReason(json: JSONObject): String {
+        val id = json.optDouble("innerDiameterMM", Double.NaN)
+        val bw = json.optDouble("bandWidthMM", Double.NaN)
+        val h  = json.optDouble("heightMM", Double.NaN)
+        return when {
+            !id.isFinite() || !bw.isFinite() || !h.isFinite() -> "missing or non-numeric values"
+            bw <= 0 || bw > 6 -> "band width %.2f mm out of 0.5–6 mm".format(bw)
+            h <= 0 || h > 20 -> "height %.2f mm out of 0.5–20 mm".format(h)
+            else -> "values outside the detected ring range"
+        }
     }
 
     private suspend fun capturePreviewBase64(): String? {
@@ -777,6 +855,47 @@ class RingToolFragment : BottomSheetDialogFragment() {
             } else bitmap
             val out = ByteArrayOutputStream()
             scaled.compress(Bitmap.CompressFormat.PNG, 90, out)
+            if (scaled !== bitmap) scaled.recycle()
+            bitmap.recycle()
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        }
+    }
+
+    /**
+     * Captures the calibrated close-up (camera auto-fitted to the ring, dimension
+     * callouts + 10 mm scale bar). Falls back to the plain full-view screenshot
+     * when the ring isn't analyzed yet.
+     */
+    private suspend fun captureRingInspectionBase64(): String? {
+        val host = activity as? MainActivity ?: return null
+        val w = host.glView.width; val h = host.glView.height
+        if (w <= 0 || h <= 0) return null
+        var rgba: ByteArray? = null
+        val latch = CountDownLatch(1)
+        host.glView.queueEvent {
+            try { rgba = NativeLib.nativeTakeRingInspectionShot(targetMeshIdx) } catch (_: Exception) {}
+            latch.countDown()
+        }
+        withContext(Dispatchers.IO) { latch.await() }
+        val bytes = rgba ?: return capturePreviewBase64()
+        if (bytes.size < w * h * 4) return capturePreviewBase64()
+        return withContext(Dispatchers.Default) {
+            val pixels = IntArray(w * h)
+            for (i in pixels.indices) {
+                val b = i * 4
+                pixels[i] = ((bytes[b + 3].toInt() and 255) shl 24) or
+                    ((bytes[b].toInt() and 255) shl 16) or
+                    ((bytes[b + 1].toInt() and 255) shl 8) or
+                    (bytes[b + 2].toInt() and 255)
+            }
+            val bitmap = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+            val maxSide = 1024
+            val scaled = if (w > maxSide || h > maxSide) {
+                val scale = minOf(maxSide.toFloat() / w, maxSide.toFloat() / h)
+                Bitmap.createScaledBitmap(bitmap, (w * scale).toInt(), (h * scale).toInt(), true)
+            } else bitmap
+            val out = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.PNG, 92, out)
             if (scaled !== bitmap) scaled.recycle()
             bitmap.recycle()
             Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)

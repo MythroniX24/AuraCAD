@@ -2858,6 +2858,119 @@ std::vector<uint8_t> Renderer::takeScreenshot(){
     return p;
 }
 
+// Close-up AI inspection shot of the analyzed ring. The camera is temporarily
+// aimed at the ring centre and fitted so the ring fills the frame; dimension
+// callouts are drawn in world space (red = inner diameter, cyan = band width,
+// green = height) plus a white bar that is EXACTLY 10 mm, giving the vision
+// model a real pixel→mm calibration. Camera + overlay state are restored.
+std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx){
+    if(meshIdx<0 || meshIdx>=(int)m_meshes.size() || !m_ring.valid || m_ring.meshIdx!=meshIdx)
+        return {};
+    const MeshObject& mo = m_meshes[meshIdx];
+    if(mo.vertices.empty()) return {};
+
+    // ── Save state we temporarily override ───────────────────────────────────
+    const float saveYaw=m_camYaw, savePitch=m_camPitch, saveDist=m_camDist;
+    const float savePanX=m_panX,  savePanY=m_panY;
+    const int   saveGizmo=m_gizmoMode;
+    const bool  saveR1=m_rulerHasP1, saveR2=m_rulerHasP2;
+
+    // ── World-space bounds of the ring mesh ──────────────────────────────────
+    Mat4 global = buildGlobalMatrix();
+    Mat4 model  = global * buildMeshMatrix(mo);
+    float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX,mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
+    for(const auto& v:mo.vertices){
+        Vec3 p=applyMat4Point(model,v.px,v.py,v.pz);
+        mnX=std::min(mnX,p.x); mxX=std::max(mxX,p.x);
+        mnY=std::min(mnY,p.y); mxY=std::max(mxY,p.y);
+        mnZ=std::min(mnZ,p.z); mxZ=std::max(mxZ,p.z);
+    }
+    if(mxX<=mnX||mxY<=mnY||mxZ<=mnZ) return {};
+    const float cx=0.5f*(mnX+mxX), cy=0.5f*(mnY+mxY), cz=0.5f*(mnZ+mxZ);
+    const float radius=0.5f*std::sqrt((mxX-mnX)*(mxX-mnX)+(mxY-mnY)*(mxY-mnY)+(mxZ-mnZ)*(mxZ-mnZ));
+    if(radius<1e-6f) return {};
+
+    // ── Fit camera: same viewing angle as resetCamera, ring fills ~60% ──────
+    m_camYaw=0.4f; m_camPitch=0.3f;
+    m_panX=cx; m_panY=cy;
+    m_camDist=2.0f*radius/std::tan(60.0f*0.5f*DEG2RAD)*0.6f;
+    if(m_camDist<0.01f) m_camDist=0.01f;
+    m_gizmoMode=0; m_rulerHasP1=false; m_rulerHasP2=false;
+
+    // Render the fitted view, then draw the callouts on top.
+    draw();
+
+    Vec3 cW=applyMat4Point(model, m_ring.center.x, m_ring.center.y, m_ring.center.z);
+    Vec3 aW=(applyMat4Point(model, m_ring.center.x+m_ring.axis.x,
+                            m_ring.center.y+m_ring.axis.y,
+                            m_ring.center.z+m_ring.axis.z)-cW).normalized();
+    if(aW.length()<1e-6f) aW={0,1,0};
+    Vec3 up{0,1,0};
+    Vec3 u = aW.cross(up);
+    if(u.length()<1e-6f) u = aW.cross(Vec3{1,0,0});
+    u=u.normalized();
+    Vec3 v = aW.cross(u).normalized();
+
+    // World length of one normalized unit along each ring direction.
+    float scaleU=(applyMat4Point(model, m_ring.center.x+u.x, m_ring.center.y+u.y,
+                                 m_ring.center.z+u.z)-cW).length();
+    if(scaleU<1e-9f) scaleU=1.f;
+    float scaleA=(applyMat4Point(model, m_ring.center.x+aW.x, m_ring.center.y+aW.y,
+                                 m_ring.center.z+aW.z)-cW).length();
+    if(scaleA<1e-9f) scaleA=1.f;
+
+    float iRN=m_ring.currentInnerR>0.f?m_ring.currentInnerR:m_ring.innerR;
+    float oRN=m_ring.currentOuterR>0.f?m_ring.currentOuterR:m_ring.outerR;
+    float hN =m_ring.currentHeight>0.f?m_ring.currentHeight:m_ring.heightAx;
+    float iR=iRN*scaleU, oR=oRN*scaleU, hh=hN*scaleA*0.5f;
+
+    // World length of a 10 mm bar (app mm semantics: 1 norm unit = mmPerUnit mm).
+    float barWorld = 10.0f*scaleU/std::max(mmPerUnit(),1e-6f);
+    Vec3 barC = cW - v*oR*1.4f;   // below the ring along the second in-plane axis
+
+    Mat4 proj=Mat4::perspective(60.0f*DEG2RAD,(float)m_width/std::max(m_height,1),0.01f,100.0f);
+    Vec3 eye=cameraEye();
+    Mat4 view=Mat4::lookAt(eye,{m_panX,m_panY,0},{0,1,0});
+    Mat4 vp=proj*view;
+
+    auto line=[&](const Vec3& a,const Vec3& b,float r,float g,float bl,float wdt){
+        float pts[6]={a.x,a.y,a.z,b.x,b.y,b.z};
+        glUseProgram(m_wireProg);
+        glUniformMatrix4fv(m_uloc.wireMvp,1,GL_FALSE,vp.m);
+        glUniform4f(m_uloc.wireColor,r,g,bl,1.0f);
+        glUniform1f(m_uloc.wirePointSize,1.0f);
+        glDisable(GL_DEPTH_TEST);
+        glLineWidth(wdt);
+        glBindVertexArray(m_rulerVao);
+        glBindBuffer(GL_ARRAY_BUFFER,m_rulerVbo);
+        glBufferSubData(GL_ARRAY_BUFFER,0,sizeof(pts),pts);
+        glDrawArrays(GL_LINES,0,2);
+        glBindVertexArray(0);
+        glEnable(GL_DEPTH_TEST);
+    };
+
+    line(cW-u*iR, cW+u*iR, 1.0f,0.25f,0.25f, 3.0f);          // red: inner diameter
+    line(cW+u*iR, cW+u*oR, 0.2f,0.85f,1.0f, 3.0f);            // cyan: band width
+    line(cW-aW*hh, cW+aW*hh, 0.3f,1.0f,0.45f, 3.0f);          // green: height (along ring axis)
+    line(barC-u*(barWorld*0.5f), barC+u*(barWorld*0.5f), 1.0f,1.0f,1.0f, 4.0f); // white: 10 mm
+    glLineWidth(1.0f);
+
+    std::vector<uint8_t> p((size_t)m_width*m_height*4);
+    glReadPixels(0,0,m_width,m_height,GL_RGBA,GL_UNSIGNED_BYTE,p.data());
+    int rb=m_width*4; std::vector<uint8_t> row((size_t)rb);
+    for(int y=0;y<m_height/2;++y){
+        uint8_t* top=p.data()+y*rb,*bot=p.data()+(m_height-1-y)*rb;
+        memcpy(row.data(),top,rb); memcpy(top,bot,rb); memcpy(bot,row.data(),rb);
+    }
+
+    // ── Restore camera + overlay state ──────────────────────────────────────
+    m_camYaw=saveYaw; m_camPitch=savePitch; m_camDist=saveDist;
+    m_panX=savePanX; m_panY=savePanY;
+    m_gizmoMode=saveGizmo;
+    m_rulerHasP1=saveR1; m_rulerHasP2=saveR2;
+    return p;
+}
+
 int Renderer::getMeshVertexCount(int idx) const {
     if (idx < 0 || idx >= (int)m_meshes.size()) return 0;
     return (int)m_meshes[idx].vertices.size();

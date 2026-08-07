@@ -251,6 +251,13 @@ public:
     bool canUndo() const { return !m_undoStack.empty(); }
     bool canRedo() const { return !m_redoStack.empty(); }
     std::vector<uint8_t> takeScreenshot();
+    /** Close-up AI inspection shot of the analyzed ring: camera temporarily
+     *  auto-fits the ring mesh and dimension callouts are drawn in world space
+     *  (red = inner diameter, cyan = band width, green = height) plus a white
+     *  10 mm scale bar, so a vision model can calibrate pixels→mm. All camera
+     *  and overlay state is restored before returning. Empty when the ring is
+     *  not analyzed. GL thread only. */
+    std::vector<uint8_t> takeRingInspectionShot(int meshIdx);
     float getFPS() const { return m_fps; }
     TransformState getTransform() const;
 
