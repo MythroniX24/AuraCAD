@@ -2957,8 +2957,8 @@ std::vector<uint8_t> Renderer::takeRingInspectionShot(int meshIdx, int view){
 
     Mat4 proj=Mat4::perspective(60.0f*DEG2RAD,(float)m_width/std::max(m_height,1),0.01f,100.0f);
     Vec3 eye=cameraEye();
-    Mat4 view=Mat4::lookAt(eye,{m_panX,m_panY,0},{0,1,0});
-    Mat4 vp=proj*view;
+    Mat4 lookView=Mat4::lookAt(eye,{m_panX,m_panY,0},{0,1,0});
+    Mat4 vp=proj*lookView;
 
     auto line=[&](const Vec3& a,const Vec3& b,float r,float g,float bl,float wdt){
         float pts[6]={a.x,a.y,a.z,b.x,b.y,b.z};
