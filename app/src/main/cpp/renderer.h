@@ -137,6 +137,8 @@ public:
     /** start=true pushes ONE undo snapshot (call once per gesture); then stream
      *  dx/dy deltas with start=false.  Applies move / rotate / scale on the
      *  global transform according to m_gizmoMode. */
+    /** Returns gizmo axis 0..2 under screen coords, or -1 when no gizmo handle is hit. */
+    int  hitTestGizmo(float sx, float sy, float sw, float sh) const;
     void gizmoDrag(float dx, float dy, bool start);
 
     // Global transform
@@ -265,6 +267,12 @@ private:
     int    m_gizAxisOffset[3] = {0,0,0};
     int    m_gizAxisCount[3]  = {0,0,0};
     void   buildGizmoGeometry();      // rebuilds vertex buffer for m_gizmoMode
+
+    // Cached gizmo anchor (world-space centre + size), refreshed on the GL
+    // thread by drawGizmo() and reused by hitTestGizmo() so a plain touch never
+    // has to re-scan every mesh vertex again on the interaction thread.
+    float  m_gizAnchorCx=0.f, m_gizAnchorCy=0.f, m_gizAnchorCz=0.f, m_gizAnchorSize=0.f;
+    bool   m_gizAnchorValid=false;
     void   drawGizmo(const Mat4& proj, const Mat4& view);
 
     // Cached uniform locations — avoids glGetUniformLocation every frame

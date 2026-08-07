@@ -1,6 +1,8 @@
 package com.modelviewer3d
 
+import android.graphics.Bitmap
 import android.graphics.Color
+import android.util.Base64
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
@@ -15,7 +17,14 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.Switch
 import android.widget.TextView
+import androidx.lifecycle.lifecycleScope
 import com.google.android.material.bottomsheet.BottomSheetDialogFragment
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.CountDownLatch
 
 /**
  * Ring Tool — rebuilt from scratch on the AuraCAD UI Kit.
@@ -69,6 +78,12 @@ class RingToolFragment : BottomSheetDialogFragment() {
     // Field type is View on purpose — assigning LinearLayout children
     // (measureCard result) must stay View-typed to avoid smart-cast errors.
     private var presetScroll: LinearLayout? = null
+
+    // Gemini AI Ring Fit
+    private var aiCard: View? = null
+    private var aiTargetInput: EditText? = null
+    private var aiStatus: TextView? = null
+    private var aiButton: Button? = null
 
     private var lastBW = -1f
     private var lastID = -1f
@@ -257,6 +272,47 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 setOnClickListener { detect() }
             })
         })
+
+        // ── AI visual ring fitting ────────────────────────────────────────────
+        // Gemini receives the native screenshot plus the measured ring values,
+        // returns strict JSON, and the validated values are applied through the
+        // same native async setters used by the manual controls.
+        val builtAiCard = UISheetKit.card(ctx, marginTopDp = 12).apply {
+            addView(UISheetKit.cardTitle(ctx, "AI RING FIT", "#A78BFA"))
+            addView(UISheetKit.subText(ctx,
+                "Gemini visually inspects the ring preview, reasons about the requested size, " +
+                    "then applies a safe inner diameter, band width and height.",
+                "#A9B8CC", 10f))
+            addView(LinearLayout(ctx).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                setPadding(0, UISheetKit.dp(ctx, 10), 0, 0)
+                addView(UISheetKit.inputField(ctx, "Target inner diameter", "", numeric = true).apply {
+                    layoutParams = LinearLayout.LayoutParams(0,
+                        LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                }.also { aiTargetInput = it })
+                addView(TextView(ctx).apply {
+                    text = "  mm"
+                    textSize = 12f
+                    setTextColor(Color.parseColor("#7A8BA3"))
+                })
+            })
+            addView(UISheetKit.primaryButton(ctx, "✨  Analyze & Fit with Gemini", 48).apply {
+                setOnClickListener { runAiRingFit() }
+            }.also { aiButton = it })
+            addView(TextView(ctx).apply {
+                text = ""
+                textSize = 10f
+                setLineSpacing(0f, 1.2f)
+                setPadding(0, UISheetKit.dp(ctx, 8), 0, 0)
+                setTextColor(Color.parseColor("#7A8BA3"))
+            }.also { aiStatus = it })
+        }
+        // Available immediately: Gemini can visually inspect the preview and
+        // native-detect the selected mesh as part of the fit request.
+        builtAiCard.visibility = View.VISIBLE
+        aiCard = builtAiCard
+        root.addView(builtAiCard)
 
         return scroll
     }
@@ -521,6 +577,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         cardH?.visibility = View.VISIBLE
         buildPresets()
         presetScroll?.visibility = View.VISIBLE
+        aiCard?.visibility = View.VISIBLE
         updateInfo(); updatePreview()
     }
 
@@ -572,6 +629,166 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
     private fun valueToProgress(v: Float, min: Float, max: Float) =
         ((v - min) / (max - min) * STEPS).toInt().coerceIn(0, STEPS)
+
+    // ── Gemini visual ring fitting ───────────────────────────────────────────
+    private fun runAiRingFit() {
+        val target = aiTargetInput?.text?.toString()?.toFloatOrNull()
+        if (target == null || !target.isFinite() || target <= 0f) {
+            setAiStatus("Enter a target inner diameter in millimetres.", "#FF7A72")
+            return
+        }
+        // Range is validated against the detected ring's real limits AFTER
+        // auto-detection below (the defaults before detection are too wide).
+        val ctx = requireContext()
+        val key = AiPrefs.apiKey(ctx)
+        val keyError = GeminiClient.validateApiKey(key)
+        if (keyError != null) {
+            setAiStatus("$keyError Open ⋯ → AI Assistant to save a key.", "#FF7A72")
+            return
+        }
+
+        aiButton?.isEnabled = false
+        setAiStatus("Inspecting the ring preview and preparing measurements…", "#FFD54F")
+        lifecycleScope.launch {
+            try {
+                if (!ringAnalyzed) {
+                    val detected = withContext(Dispatchers.IO) {
+                        var ok = false
+                        val latch = CountDownLatch(1)
+                        glRun {
+                            ok = try { NativeLib.nativeAnalyzeRing(targetMeshIdx) } catch (_: Exception) { false }
+                            latch.countDown()
+                        }
+                        latch.await()
+                        ok
+                    }
+                    if (!detected) throw IllegalArgumentException("Selected mesh is not recognized as a ring")
+                    val params = withContext(Dispatchers.IO) {
+                        var p = FloatArray(0)
+                        val latch = CountDownLatch(1)
+                        glRun {
+                            p = try { NativeLib.nativeGetRingParams() } catch (_: Exception) { FloatArray(0) }
+                            latch.countDown()
+                        }
+                        latch.await()
+                        p
+                    }
+                    if (params.size < 6) throw IllegalArgumentException("Ring measurements could not be read")
+                    withContext(Dispatchers.Main) { applyParams(params) }
+                }
+                if (target < idMin || target > idMax) {
+                    throw IllegalArgumentException(
+                        "Target must be between %.2f and %.2f mm for this ring.".format(idMin, idMax))
+                }
+                val image = withContext(Dispatchers.IO) { capturePreviewBase64() }
+                if (image.isNullOrBlank()) throw IllegalStateException("Could not capture the model preview")
+                val prompt = """
+                    Analyze this AuraCAD ring preview and return ONLY valid JSON.
+                    The user wants inner diameter $target mm.
+                    Current measured geometry: innerDiameter=${origInnerDiaMM} mm,
+                    bandWidth=${origBandWidthMM} mm, height=${origHeightMM} mm.
+                    Choose safe manufacturable values while preserving the ring shape.
+                    JSON schema exactly:
+                    {"innerDiameterMM": number, "bandWidthMM": number, "heightMM": number, "reason": "short explanation"}
+                    Do not include markdown or extra keys. Keep band width and height positive.
+                """.trimIndent()
+                val reply = GeminiClient.generate(
+                    apiKey = key,
+                    systemPrompt = "You are AuraCAD's precise jewelry fitting assistant. Use the image as visual context, but never invent unsafe geometry. Return only the requested JSON.",
+                    userPrompt = prompt,
+                    pngBase64 = image,
+                    model = AiPrefs.model(ctx)
+                )
+                val json = parseAiFit(reply.text)
+                val aiId = json.getDouble("innerDiameterMM").toFloat()
+                val aiBw = json.getDouble("bandWidthMM").toFloat()
+                val aiH = json.getDouble("heightMM").toFloat()
+                val reason = json.optString("reason", "Fit applied")
+                if (!aiId.isFinite() || !aiBw.isFinite() || !aiH.isFinite() ||
+                    aiId <= 0f || aiBw <= 0f || aiH <= 0f) {
+                    throw IllegalArgumentException("Gemini returned invalid measurements")
+                }
+                val safeId = aiId.coerceIn(idMin, idMax)
+                val safeBw = aiBw.coerceIn(bwMin, bwMax)
+                val safeH = aiH.coerceIn(hMin, hMax)
+                // Apply all three values atomically in ONE native call (a single
+                // undo snapshot). Proportional mode is suspended so the setters
+                // don't recalculate each other's dimensions and drift the result.
+                val wasProportional = proportional
+                proportional = false
+                lastBW = safeBw; lastID = safeId; lastH = safeH
+                glRun {
+                    NativeLib.nativePushUndoState()
+                    NativeLib.nativeSetRingBandWidthAsync(safeBw)
+                    NativeLib.nativeSetRingInnerDiameterAsync(safeId)
+                    NativeLib.nativeSetRingHeightAsync(safeH)
+                }
+                applyValue(safeBw, "#4DD8FF", fromUser = false)
+                applyValue(safeId, "#FFC46B", fromUser = false)
+                applyValue(safeH, "#A78BFA", fromUser = false)
+                proportional = wasProportional
+                activity?.runOnUiThread { updateInfo(); updatePreview() }
+                setAiStatus("✓ ${reply.model}: %.2f mm inner · %.2f mm band · %.2f mm height\n%s".format(safeId, safeBw, safeH, reason), "#4CAF82")
+            } catch (e: GeminiClient.GeminiException) {
+                setAiStatus("Gemini: ${e.message}", "#FF7A72")
+            } catch (e: Exception) {
+                setAiStatus("AI fit failed: ${e.message ?: "try again"}", "#FF7A72")
+            } finally {
+                aiButton?.isEnabled = true
+            }
+        }
+    }
+
+    private fun parseAiFit(raw: String?): JSONObject {
+        val text = raw.orEmpty().replace("```json", "", true).replace("```", "").trim()
+        val start = text.indexOf('{'); val end = text.lastIndexOf('}')
+        if (start < 0 || end <= start) throw IllegalArgumentException("Gemini did not return JSON")
+        return JSONObject(text.substring(start, end + 1))
+    }
+
+    private suspend fun capturePreviewBase64(): String? {
+        val host = activity as? MainActivity ?: return null
+        val w = host.glView.width; val h = host.glView.height
+        if (w <= 0 || h <= 0) return null
+        var rgba: ByteArray? = null
+        val latch = CountDownLatch(1)
+        host.glView.queueEvent {
+            try { rgba = NativeLib.nativeTakeScreenshot() } catch (_: Exception) {}
+            latch.countDown()
+        }
+        withContext(Dispatchers.IO) { latch.await() }
+        val bytes = rgba ?: return null
+        if (bytes.size < w * h * 4) return null
+        return withContext(Dispatchers.Default) {
+            val pixels = IntArray(w * h)
+            for (i in pixels.indices) {
+                val b = i * 4
+                pixels[i] = ((bytes[b + 3].toInt() and 255) shl 24) or
+                    ((bytes[b].toInt() and 255) shl 16) or
+                    ((bytes[b + 1].toInt() and 255) shl 8) or
+                    (bytes[b + 2].toInt() and 255)
+            }
+            // Keep Gemini requests responsive and bounded for large viewports.
+            val bitmap = Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+            val maxSide = 1024
+            val scaled = if (w > maxSide || h > maxSide) {
+                val scale = minOf(maxSide.toFloat() / w, maxSide.toFloat() / h)
+                Bitmap.createScaledBitmap(bitmap, (w * scale).toInt(), (h * scale).toInt(), true)
+            } else bitmap
+            val out = ByteArrayOutputStream()
+            scaled.compress(Bitmap.CompressFormat.PNG, 90, out)
+            if (scaled !== bitmap) scaled.recycle()
+            bitmap.recycle()
+            Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+        }
+    }
+
+    private fun setAiStatus(message: String, color: String) {
+        activity?.runOnUiThread {
+            aiStatus?.text = message
+            aiStatus?.setTextColor(Color.parseColor(color))
+        }
+    }
 
     // ── Long-press selection sync ─────────────────────────────────────────────
     private val selectedMeshChangedReceiver = object : android.content.BroadcastReceiver() {

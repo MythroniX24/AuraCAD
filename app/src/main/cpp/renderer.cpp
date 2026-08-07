@@ -263,11 +263,14 @@ void Renderer::drawGizmo(const Mat4& proj,const Mat4& view){
             mnZ=std::min(mnZ,pz);mxZ=std::max(mxZ,pz);
         }
     }
-    if(mxX<=mnX) return;
+    if(mxX<=mnX){ m_gizAnchorValid=false; return; }
     float cx=0.5f*(mnX+mxX), cy=0.5f*(mnY+mxY), cz=0.5f*(mnZ+mxZ);
     float size=std::max(mxX-mnX,std::max(mxY-mnY,mxZ-mnZ));
     if(size<1e-4f) size=1.0f;
     size*=0.55f;
+    // Cache the anchor so hitTestGizmo() never re-scans every vertex.
+    m_gizAnchorCx=cx; m_gizAnchorCy=cy; m_gizAnchorCz=cz; m_gizAnchorSize=size;
+    m_gizAnchorValid=true;
     Mat4 giz=Mat4::translation(cx,cy,cz)*Mat4::scale(size,size,size);
     Mat4 mvp=proj*view*giz;
     glUseProgram(m_wireProg);
@@ -285,6 +288,101 @@ void Renderer::drawGizmo(const Mat4& proj,const Mat4& view){
     glBindVertexArray(0);
     glEnable(GL_DEPTH_TEST);
     glLineWidth(1.0f);
+}
+
+// Hit-test the visible gizmo in screen space. A transform tool being selected
+// is not enough to mutate the model: the user must touch an axis handle.
+int Renderer::hitTestGizmo(float sx,float sy,float sw,float sh) const {
+    if (m_gizmoMode <= 0 || sw <= 1.f || sh <= 1.f || m_meshes.empty()) return -1;
+
+    // Reuse the anchor cached by drawGizmo() (same GL thread, refreshed every
+    // frame the gizmo is visible) instead of scanning every mesh vertex.
+    float cx=m_gizAnchorCx, cy=m_gizAnchorCy, cz=m_gizAnchorCz;
+    float size=m_gizAnchorSize;
+    if (!m_gizAnchorValid || size < 1e-4f) {
+        float mnX=FLT_MAX,mnY=FLT_MAX,mnZ=FLT_MAX;
+        float mxX=-FLT_MAX,mxY=-FLT_MAX,mxZ=-FLT_MAX;
+        Mat4 global = buildGlobalMatrix();
+        for (const auto& mo : m_meshes) {
+            if (!mo.visible || mo.vertices.empty()) continue;
+            Mat4 model = global * buildMeshMatrix(mo);
+            for (const auto& v : mo.vertices) {
+                float x=model.m[0]*v.px+model.m[4]*v.py+model.m[8]*v.pz+model.m[12];
+                float y=model.m[1]*v.px+model.m[5]*v.py+model.m[9]*v.pz+model.m[13];
+                float z=model.m[2]*v.px+model.m[6]*v.py+model.m[10]*v.pz+model.m[14];
+                mnX=std::min(mnX,x); mxX=std::max(mxX,x);
+                mnY=std::min(mnY,y); mxY=std::max(mxY,y);
+                mnZ=std::min(mnZ,z); mxZ=std::max(mxZ,z);
+            }
+        }
+        if (mxX <= mnX) return -1;
+        cx=0.5f*(mnX+mxX); cy=0.5f*(mnY+mxY); cz=0.5f*(mnZ+mxZ);
+        size=std::max(mxX-mnX,std::max(mxY-mnY,mxZ-mnZ))*0.55f;
+        if (size < 1e-4f) size=1.f;
+    }
+
+    const float aspect=sw/std::max(sh,1.f);
+    Mat4 proj=Mat4::perspective(60.f*DEG2RAD,aspect,0.01f,100.f);
+    Vec3 eye=cameraEye();
+    Mat4 view=Mat4::lookAt(eye,{m_panX,m_panY,0},{0,1,0});
+    auto screenPoint = [&](float x,float y,float z, float& ox,float& oy)->bool {
+        // Transform to view space, then project. Computes proj*view*point
+        // without needing a Mat4 inverse in the touch path.
+        float vx=view.m[0]*x+view.m[4]*y+view.m[8]*z+view.m[12];
+        float vy=view.m[1]*x+view.m[5]*y+view.m[9]*z+view.m[13];
+        float vz=view.m[2]*x+view.m[6]*y+view.m[10]*z+view.m[14];
+        float px=proj.m[0]*vx+proj.m[4]*vy+proj.m[8]*vz+proj.m[12];
+        float py=proj.m[1]*vx+proj.m[5]*vy+proj.m[9]*vz+proj.m[13];
+        float pw=proj.m[3]*vx+proj.m[7]*vy+proj.m[11]*vz+proj.m[15];
+        if (pw <= 1e-5f) return false;
+        ox=(px/pw+1.f)*0.5f*sw;
+        oy=(1.f-py/pw)*0.5f*sh;
+        return true;
+    };
+    auto segmentDistance = [](float px,float py,float ax,float ay,float bx,float by)->float {
+        float dx=bx-ax,dy=by-ay, len2=dx*dx+dy*dy;
+        float t=len2>1e-6f ? ((px-ax)*dx+(py-ay)*dy)/len2 : 0.f;
+        t=std::clamp(t,0.f,1.f);
+        float qx=ax+t*dx,qy=ay+t*dy;
+        return std::sqrt((px-qx)*(px-qx)+(py-qy)*(py-qy));
+    };
+
+    float best=std::max(28.f,std::min(sw,sh)*0.045f); int bestAxis=-1;
+    float ox,oy,cxScreen,cyScreen;
+    if (!screenPoint(cx,cy,cz,cxScreen,cyScreen)) return -1;
+    for (int axis=0; axis<3; ++axis) {
+        // ROTATE draws ring handles only — never test the invisible centre
+        // shaft, otherwise touching near the middle would grab a phantom axis.
+        if(m_gizmoMode!=2){
+            float ex=cx,ey=cy,ez=cz;
+            if(axis==0) ex+=size; else if(axis==1) ey+=size; else ez+=size;
+            if (!screenPoint(ex,ey,ez,ox,oy)) continue;
+            float d=segmentDistance(sx,sy,cxScreen,cyScreen,ox,oy);
+            if(d<best){best=d;bestAxis=axis;}
+        }
+        if(m_gizmoMode==2){
+            float ux=0,uy=0,uz=0,vx=0,vy=0,vz=0;
+            if(axis==0){uy=1;vz=1;} else if(axis==1){ux=1;vz=1;} else {ux=1;vy=1;}
+            // Rings are drawn at 0.95*size in buildGizmoGeometry — test the
+            // same radius so the hit area matches the visible handle.
+            const float ringR=size*0.95f;
+            for(int i=0;i<32;++i){
+                float a0=(float)i/32.f*2.f*PI,a1=(float)(i+1)/32.f*2.f*PI;
+                float x0=cx+ringR*(std::cos(a0)*ux+std::sin(a0)*vx);
+                float y0=cy+ringR*(std::cos(a0)*uy+std::sin(a0)*vy);
+                float z0=cz+ringR*(std::cos(a0)*uz+std::sin(a0)*vz);
+                float x1=cx+ringR*(std::cos(a1)*ux+std::sin(a1)*vx);
+                float y1=cy+ringR*(std::cos(a1)*uy+std::sin(a1)*vy);
+                float z1=cz+ringR*(std::cos(a1)*uz+std::sin(a1)*vz);
+                float aX,aY,bX,bY;
+                if(screenPoint(x0,y0,z0,aX,aY)&&screenPoint(x1,y1,z1,bX,bY)) {
+                    const float d = segmentDistance(sx,sy,aX,aY,bX,bY);
+                    if (d < best) { best = d; bestAxis = axis; }
+                }
+            }
+        }
+    }
+    return bestAxis;
 }
 
 // One-finger drag while a gizmo tool is active.  start=true = push one undo
@@ -697,6 +795,7 @@ bool Renderer::uploadParsed(){
         LOGE("uploadParsed: no pending data");
         return false;
     }
+    m_gizAnchorValid=false;  // mesh set changed — drop the cached gizmo anchor
     for(auto& mo:m_meshes){
         if(mo.vao) glDeleteVertexArrays(1,&mo.vao);
         if(mo.vbo) glDeleteBuffers(1,&mo.vbo);
@@ -885,6 +984,7 @@ void Renderer::selectMesh(int idx){
 }
 void Renderer::deleteMesh(int idx){
     if(idx<0||idx>=(int)m_meshes.size()) return;
+    m_gizAnchorValid=false;  // mesh removed — stale anchor would point at nothing
     auto& mo=m_meshes[idx];
     if(mo.vao) glDeleteVertexArrays(1,&mo.vao);
     if(mo.vbo) glDeleteBuffers(1,&mo.vbo);
@@ -1441,6 +1541,7 @@ bool Renderer::export3DS(const std::string& path) const {
 
 // ── Combine meshes ───────────────────────────────────────────────────────────
 bool Renderer::combineMeshes(const std::vector<int>& indices){
+    m_gizAnchorValid=false;  // mesh topology changed — invalidate cached anchor
     std::vector<int> idxs;
     for(int i : indices){
         if(i>=0 && i<(int)m_meshes.size() &&
@@ -2661,6 +2762,7 @@ void Renderer::pushDeleteUndo(int idx){
 }
 
 void Renderer::restoreState(const UndoEntry& e){
+    m_gizAnchorValid=false;  // geometry restored — recompute anchor next draw
     // 1. Global transform
     m_rotX=e.global.rotX;m_rotY=e.global.rotY;m_rotZ=e.global.rotZ;
     m_posX=e.global.posX;m_posY=e.global.posY;m_posZ=e.global.posZ;

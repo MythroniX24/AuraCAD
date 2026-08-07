@@ -15,6 +15,15 @@
         <item name="bottomSheetDialogTheme">@style/BottomSheetStyle</item>
     </style>
 
+    <!-- High-contrast overflow menu used over the dark 3D viewport. -->
+    <style name="ThemeOverlay_AuraPopup" parent="ThemeOverlay.MaterialComponents.Dark">
+        <item name="android:colorBackground">#172235</item>
+        <item name="android:textColorPrimary">#F2F6FB</item>
+        <item name="android:textColorSecondary">#C8D6E8</item>
+        <item name="android:windowMinWidthMajor">65%</item>
+        <item name="android:windowMinWidthMinor">80%</item>
+    </style>
+
     <style name="BottomSheetStyle" parent="Theme.Design.Light.BottomSheetDialog">
         <item name="android:windowIsFloating">false</item>
         <item name="bottomSheetStyle">@style/BottomSheetShapeStyle</item>

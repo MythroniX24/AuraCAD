@@ -150,6 +150,11 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeGetGizmoMode(JNIEn
     return (jint)g_renderer->getGizmoMode();
 }
 // start=true pushes ONE undo snapshot; then stream dx/dy deltas with start=false.
+JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeHitTestGizmo(JNIEnv*,jclass,jfloat sx,jfloat sy,jfloat sw,jfloat sh){
+    LOCK_RENDERER();
+    if(!g_renderer) return -1;
+    return (jint)g_renderer->hitTestGizmo((float)sx,(float)sy,(float)sw,(float)sh);
+}
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDrag(JNIEnv*,jclass,jfloat dx,jfloat dy,jboolean start){
     LOCK_OR_VOID(); g_renderer->gizmoDrag((float)dx,(float)dy,start==JNI_TRUE);
 }

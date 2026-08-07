@@ -34,6 +34,11 @@ class ModelGLSurfaceView @JvmOverloads constructor(
     private var lastMidX = 0f; private var lastMidY = 0f
     // Track whether scale gesture is actively running
     private var isScaling = false
+    // A transform tool is only armed after the initial touch lands on the
+    // rendered gizmo. Touching elsewhere keeps the normal camera orbit.
+    @Volatile private var gizmoHitPending = false
+    @Volatile private var gizmoHitAxis = -1
+    @Volatile private var gestureGeneration = 0
     // Gizmo undo snapshot pushed only once the first real drag starts (so a
     // plain tap doesn't pollute the undo stack)
     private var gizmoUndoPushed = false
@@ -128,6 +133,24 @@ class ModelGLSurfaceView @JvmOverloads constructor(
                 lastX = event.x; lastY = event.y
                 isScaling = false
                 gizmoUndoPushed = false
+                val generation = ++gestureGeneration
+                gizmoHitAxis = -1
+                if (mode == Mode.CAMERA && gizmoTool != 0) {
+                    gizmoHitPending = true
+                    val sx = event.x; val sy = event.y
+                    val sw = width.toFloat(); val sh = height.toFloat()
+                    queueEvent {
+                        val hit = try {
+                            NativeLib.nativeHitTestGizmo(sx, sy, sw, sh)
+                        } catch (_: Exception) { -1 }
+                        if (generation == gestureGeneration && gizmoTool != 0) {
+                            gizmoHitAxis = hit
+                            gizmoHitPending = false
+                        }
+                    }
+                } else {
+                    gizmoHitPending = false
+                }
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
@@ -142,13 +165,23 @@ class ModelGLSurfaceView @JvmOverloads constructor(
                     val dx = event.x - lastX
                     val dy = event.y - lastY
                     if (abs(dx) > 0.4f || abs(dy) > 0.4f) {
-                        if (gizmoTool != 0) {
+                        // The async gizmo hit-test hasn't answered yet: the user
+                        // is clearly orbiting the camera, so drop the pending
+                        // result and keep this gesture a pure camera drag.
+                        if (gizmoHitPending) {
+                            ++gestureGeneration
+                            gizmoHitPending = false
+                            gizmoHitAxis = -1
+                        }
+                        if (gizmoTool != 0 && !gizmoHitPending && gizmoHitAxis >= 0) {
                             if (!gizmoUndoPushed) {
                                 gizmoUndoPushed = true
                                 queueEvent { NativeLib.nativeGizmoDrag(0f, 0f, true) } // one undo per gesture
                             }
                             queueEvent { NativeLib.nativeGizmoDrag(dx, dy, false) }
                         } else {
+                            // A selected tool is not a blanket transform mode:
+                            // only a real gizmo-handle hit transforms the model.
                             queueEvent { NativeLib.nativeTouchRotate(dx, dy) }
                         }
                     }
@@ -176,6 +209,9 @@ class ModelGLSurfaceView @JvmOverloads constructor(
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isScaling = false
                 gizmoUndoPushed = false
+                ++gestureGeneration
+                gizmoHitPending = false
+                gizmoHitAxis = -1
             }
         }
         return true

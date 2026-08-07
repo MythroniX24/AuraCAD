@@ -290,7 +290,13 @@ class MainActivity : AppCompatActivity() {
 
     // ── Top-bar overflow menu (legacy actions) ────────────────────────────────
     private fun showOverflowMenu(anchor: View) {
-        val popup = PopupMenu(this, anchor)
+        // Use an explicit dark popup context: the default DayNight popup can
+        // inherit a light/disabled text color that disappears against the
+        // translucent workspace background.
+        val popup = PopupMenu(
+            android.view.ContextThemeWrapper(this, R.style.ThemeOverlay_AuraPopup),
+            anchor
+        )
         popup.menu.add(0, 1, 0, "Open Model…")
         popup.menu.add(0, 2, 1, "Edit / Materials")
         popup.menu.add(0, 3, 2, "Mesh List")

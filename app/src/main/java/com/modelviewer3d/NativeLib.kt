@@ -38,6 +38,8 @@ object NativeLib {
     /** 0 = off, 1 = move, 2 = rotate, 3 = scale. Shows the 3D axis manipulator. */
     external fun nativeSetGizmoMode(mode: Int)
     external fun nativeGetGizmoMode(): Int
+    /** Returns the gizmo axis under the screen point, or -1 when the point is not on an axis. */
+    external fun nativeHitTestGizmo(sx: Float, sy: Float, sw: Float, sh: Float): Int
     /** One-finger drag while a gizmo tool is active. start=true pushes one undo. */
     external fun nativeGizmoDrag(dx: Float, dy: Float, start: Boolean)
 
