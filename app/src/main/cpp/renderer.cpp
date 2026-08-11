@@ -2614,6 +2614,16 @@ void Renderer::applyCombinedRingDeformation(float bwMM, float idMM, float hMM) {
     applyRadialMap(mo, m_ring.origVerts, m_ring.center, m_ring.axis,
         heightScale,
         [newInnerN, origInner, bandScale](float r) -> float {
+            if (r <= origInner) {
+                // Vertices inside the bore (r = distance from the axis). Map
+                // them proportionally so they NEVER collapse onto the axis or
+                // cross it when resizing: axis (r=0) stays at the axis, the
+                // bore surface (r=origInner) lands exactly on the new bore
+                // radius. Without this, interior vertices could go negative
+                // and the whole ring structure gets destroyed.
+                float t = (origInner > 1e-9f) ? (r / origInner) : 0.f;
+                return newInnerN * t;
+            }
             float rRel = r - origInner;          // distance from original bore surface
             float rNew = newInnerN + rRel * bandScale;
             return (rNew > 1e-9f) ? rNew : 1e-9f; // guard against negative radius

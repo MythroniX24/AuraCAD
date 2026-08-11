@@ -738,7 +738,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
                     )
                     replyModel = reply.model
                     val json = parseAiFit(reply.text)
-                    val candidate = validateAiFit(json, targetMM)
+                    val candidate = validateAiFit(json, targetMM, keepBand = beforeBW, keepHeight = beforeH)
                     if (candidate == null) {
                         lastReason = aiRejectReason(json)
                         continue
@@ -749,65 +749,32 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 }
                 val f = fit ?: throw IllegalArgumentException("Gemini measurements rejected twice ($lastReason)")
 
-                // Step 5: Apply the fit
-                val safeId = f.innerId.coerceIn(idMin, idMax)
-                val safeBw = f.band.coerceIn(bwMin, bwMax)
-                val safeH = f.height.coerceIn(hMin, hMax)
-                val wasProportional = proportional
-                proportional = false
-                lastBW = safeBw; lastID = safeId; lastH = safeH
-                glRun {
-                    NativeLib.nativePushUndoState()
-                    NativeLib.nativeSetRingBandWidthAsync(safeBw)
-                    NativeLib.nativeSetRingInnerDiameterAsync(safeId)
-                    NativeLib.nativeSetRingHeightAsync(safeH)
-                }
-                applyValue(safeBw, "#4DD8FF", fromUser = false)
-                applyValue(safeId, "#FFC46B", fromUser = false)
-                applyValue(safeH, "#A78BFA", fromUser = false)
-                proportional = wasProportional
-                activity?.runOnUiThread { updateInfo(); updatePreview() }
+                // Step 5: Apply the fit. Band width and height are kept close
+                // to the original values so the ring keeps its profile — only
+                // the size (inner diameter) changes.
+                var safeId = f.innerId.coerceIn(idMin, idMax)
+                var safeBw = preserveBand(f.band)
+                var safeH = preserveHeight(f.height)
+                applyRingValues(safeId, safeBw, safeH)
 
-                // Step 5.5: Post-change verification — re-capture and ask
-                // Gemini to confirm the ring looks correct after resizing.
+                // Step 5.5: Post-change verification — re-capture the resized
+                // ring and let Gemini confirm it looks correct. If problems are
+                // found, Gemini proposes corrected values which we apply and
+                // re-verify — the AI actually acts on what it sees.
                 setAiStatus("🔍 Verifying resized ring…", "#FFD54F")
                 var verificationNote = ""
                 try {
-                    // Small delay so the native deformation finishes rendering
-                    kotlinx.coroutines.delay(250)
-                    val verifyTop = withContext(Dispatchers.IO) {
-                        captureRingInspectionBase64(0) ?: capturePreviewBase64()
+                    val (vNote, _) = verifyAndCorrect(
+                        key = key,
+                        model = AiPrefs.model(ctx),
+                        targetLabel = targetLabel,
+                        targetMM = targetMM,
+                        id = safeId, bw = safeBw, h = safeH
+                    ) { nid, nbw, nh ->
+                        safeId = nid; safeBw = nbw; safeH = nh
+                        applyRingValues(nid, nbw, nh)
                     }
-                    val verifySide = withContext(Dispatchers.IO) { captureRingInspectionBase64(1) }
-                    val verifyImages = listOfNotNull(verifyTop, verifySide)
-                    if (verifyImages.isNotEmpty()) {
-                        val verifyPrompt = buildString {
-                            append("VERIFICATION: The ring was just resized to $targetLabel (${"%.2f".format(targetMM)} mm inner diameter).\n")
-                            append("Expected: inner≈${"%.2f".format(safeId)} mm, band≈${"%.2f".format(safeBw)} mm, height≈${"%.2f".format(safeH)} mm.\n")
-                            append("Image 1 (TOP): RED = inner diameter, CYAN = band, WHITE bar = 10 mm.\n")
-                            append("Image 2 (SIDE): GREEN = height, CYAN = band, WHITE bar = 10 mm.\n")
-                            append("Check: Does the ring look proportionally correct? Is the inner diameter approximately ${"%.1f".format(safeId)} mm using the scale bar? Are there any visual artifacts or distortions?\n")
-                            append("Return JSON: valid, actualInnerDiameterMM, assessment fields")
-                        }
-                        val verifyReply = GeminiClient.generate(
-                            apiKey = key,
-                            systemPrompt = "You are verifying a ring resize. Inspect the images and confirm the ring looks correct after resizing. Use the white 10mm bar for scale.",
-                            userPrompt = verifyPrompt,
-                            pngBase64 = verifyImages.firstOrNull(),
-                            extraImages = verifyImages.drop(1),
-                            model = AiPrefs.model(ctx)
-                        )
-                        val vJson = parseAiFit(verifyReply.text)
-                        val isValid = vJson.optBoolean("valid", true)
-                        val actualDia = vJson.optDouble("actualInnerDiameterMM", Double.NaN)
-                        val assessment = vJson.optString("assessment", "")
-                        verificationNote = if (isValid) {
-                            val diaStr = if (actualDia.isFinite()) "%.1f".format(actualDia.toFloat()) else "?"
-                            "\n✅ Verified: ~$diaStr mm — $assessment"
-                        } else {
-                            "\n⚠️ Verification: $assessment"
-                        }
-                    }
+                    verificationNote = vNote
                 } catch (_: Exception) { /* verification is best-effort */ }
 
                 // Step 6: Before → After comparison
@@ -838,6 +805,134 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 aiButton?.isEnabled = true
             }
         }
+    }
+
+    /** Keeps band width close to the original so the ring profile is preserved. */
+    private fun preserveBand(v: Float): Float =
+        v.coerceIn(bwMin, bwMax).coerceIn(origBandWidthMM * 0.5f, origBandWidthMM * 2f)
+
+    /** Keeps height close to the original so the ring profile is preserved. */
+    private fun preserveHeight(v: Float): Float =
+        v.coerceIn(hMin, hMax).coerceIn(origHeightMM * 0.5f, origHeightMM * 2f)
+
+    /** Applies new ring dimensions with a single undo snapshot. */
+    private fun applyRingValues(id: Float, bw: Float, h: Float) {
+        val wasProportional = proportional
+        proportional = false
+        lastBW = bw; lastID = id; lastH = h
+        glRun {
+            NativeLib.nativePushUndoState()
+            NativeLib.nativeSetRingBandWidthAsync(bw)
+            NativeLib.nativeSetRingInnerDiameterAsync(id)
+            NativeLib.nativeSetRingHeightAsync(h)
+        }
+        applyValue(bw, "#4DD8FF", fromUser = false)
+        applyValue(id, "#FFC46B", fromUser = false)
+        applyValue(h, "#A78BFA", fromUser = false)
+        proportional = wasProportional
+        activity?.runOnUiThread { updateInfo(); updatePreview() }
+    }
+
+    /**
+     * Re-captures the resized ring and asks Gemini to verify it looks correct.
+     * If Gemini reports problems, it proposes corrected values which are applied
+     * and re-verified — up to one auto-correction round, then best-effort.
+     */
+    private suspend fun verifyAndCorrect(
+        key: String,
+        model: String,
+        targetLabel: String,
+        targetMM: Float,
+        id: Float, bw: Float, h: Float,
+        apply: (Float, Float, Float) -> Unit
+    ): Pair<String, Boolean> {
+        var note = ""
+        var verified = false
+        var curId = id; var curBw = bw; var curH = h
+        for (round in 0 until 2) {
+            // Small delay so the native deformation finishes rendering
+            kotlinx.coroutines.delay(250)
+            val verifyTop = withContext(Dispatchers.IO) {
+                captureRingInspectionBase64(0) ?: capturePreviewBase64()
+            }
+            val verifySide = withContext(Dispatchers.IO) { captureRingInspectionBase64(1) }
+            val verifyImages = listOfNotNull(verifyTop, verifySide)
+            if (verifyImages.isEmpty()) break
+
+            val verifyPrompt = buildString {
+                append("VERIFICATION (round ${round + 1}): The ring was just resized to $targetLabel (inner ≈ ${"%.2f".format(curId)} mm).\n")
+                append("Expected: inner≈${"%.2f".format(curId)} mm, band≈${"%.2f".format(curBw)} mm, height≈${"%.2f".format(curH)} mm.\n")
+                append("Image 1 (TOP): RED = inner diameter, CYAN = band, WHITE bar = 10 mm.\n")
+                append("Image 2 (SIDE): GREEN = height, CYAN = band, WHITE bar = 10 mm.\n")
+                append("CHECK CAREFULLY:\n")
+                append("- Measure the inner diameter with the WHITE 10 mm bar — is it ≈ ${"%.1f".format(curId)} mm?\n")
+                append("- Is the ring still a clean, complete, round band? Any collapsed, inverted, torn or blown-out geometry?\n")
+                append("- Band width and height should be visually the same as before the resize (nearly unchanged).\n")
+                append("Return JSON only: {\"valid\": true/false, \"actualInnerDiameterMM\": number, \"assessment\": \"what you see\"}\n")
+                append("valid=true only if the ring is structurally correct AND the size matches.")
+            }
+            val verifyReply = GeminiClient.generate(
+                apiKey = key,
+                systemPrompt = "You verify a ring resize by inspecting the images. Use the white 10 mm bar for scale. Check that the ring is a clean, complete band with no collapsed or broken geometry, and that band and height are nearly unchanged.",
+                userPrompt = verifyPrompt,
+                pngBase64 = verifyImages.firstOrNull(),
+                extraImages = verifyImages.drop(1),
+                model = model
+            )
+            val vJson = parseAiFit(verifyReply.text)
+            val isValid = vJson.optBoolean("valid", true)
+            val actualDia = vJson.optDouble("actualInnerDiameterMM", Double.NaN)
+            val assessment = vJson.optString("assessment", "").ifBlank { "structure check" }
+            val diaStr = if (actualDia.isFinite()) "%.1f".format(actualDia.toFloat()) else "?"
+            // A large deviation between Gemini's measured diameter and the
+            // expected value means the resize did not land — treat it as a
+            // failed verification so the correction round actually fires.
+            val sizeMismatch = actualDia.isFinite() &&
+                kotlin.math.abs(actualDia.toFloat() - curId) > 0.75f
+            if (isValid && !sizeMismatch) {
+                note = "\n✅ Verified: ~$diaStr mm — $assessment"
+                verified = true
+                break
+            }
+            if (round == 1) {
+                note = if (sizeMismatch) {
+                    "\n⚠️ Verification: measured ~$diaStr mm but expected ~${"%.1f".format(curId)} mm — $assessment"
+                } else {
+                    "\n⚠️ Verification: $assessment"
+                }
+                break
+            }
+            // Round 0 failed → ask Gemini to correct what it saw
+            setAiStatus("🔧 Fixing ring per verification…", "#FFD54F")
+            val fixPrompt = buildString {
+                append("The verification of the resized ring found problems: \"$assessment\"\n")
+                append("User target: $targetLabel (inner ≈ ${"%.2f".format(targetMM)} mm).\n")
+                append("Current applied: inner≈${"%.2f".format(curId)} mm, band≈${"%.2f".format(curBw)} mm, height≈${"%.2f".format(curH)} mm.\n")
+                append("Keep band width and height nearly the same — only fix the size or the geometry issue you saw.\n")
+                append("Return JSON only: {\"innerDiameterMM\": number, \"bandWidthMM\": number, \"heightMM\": number, \"measuredInnerDiameterMM\": number, \"reason\": \"what you fixed and why\"}")
+            }
+            val fixReply = GeminiClient.generate(
+                apiKey = key,
+                systemPrompt = AI_RING_FIT_SYSTEM_PROMPT,
+                userPrompt = fixPrompt,
+                pngBase64 = verifyImages.firstOrNull(),
+                extraImages = verifyImages.drop(1),
+                model = model
+            )
+            val fixJson = parseAiFit(fixReply.text)
+            val fixCand = validateAiFit(fixJson, targetMM, keepBand = curBw, keepHeight = curH)
+            if (fixCand == null) {
+                note = "\n⚠️ Verification: $assessment (auto-fix values rejected)"
+                break
+            }
+            val newId = fixCand.innerId.coerceIn(idMin, idMax)
+            val newBw = preserveBand(fixCand.band)
+            val newH = preserveHeight(fixCand.height)
+            curId = newId; curBw = newBw; curH = newH
+            apply(newId, newBw, newH)
+            // loop continues → re-verify
+        }
+        return note to verified
     }
 
     private fun parseAiFit(raw: String?): JSONObject {
@@ -874,34 +969,41 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
             YOUR JOB:
             1. Visually measure the CURRENT inner diameter from Image 1 using the white scale bar.
-            2. Determine what band width and height are appropriate for $targetLabel.
-            3. Return the TARGET values that achieve $targetLabel.
-            4. bandWidthMM and heightMM should remain sane (band 0.5–6 mm, height 0.5–20 mm).
+            2. The user wants ONLY the SIZE changed. KEEP band width and height UNCHANGED — report the current values back exactly as given above. Do not invent new band width or height.
+            3. Return the TARGET values that achieve $targetLabel: innerDiameterMM must be ≈ ${"%.2f".format(targetMM)} mm.
+            4. US ring sizes are NEVER negative. The smallest standard US size is US 1 — if any calculation gives a negative US size, clamp it to US 1.
             5. If the current ring already matches $targetLabel, return the same values.
 
             JSON schema exactly:
             {"innerDiameterMM": number, "bandWidthMM": number, "heightMM": number, "measuredInnerDiameterMM": number, "reason": "short explanation of what you measured and what you changed"}
-            Do not include markdown or extra keys. Keep all values positive.$feedback
+            Do not include markdown or extra keys. Keep all values positive. Never use negative numbers.$feedback
         """.trimIndent()
     }
 
     /**
      * Validates a parsed AI fit. Returns an [AiFitResult] when safe, or null
-     * when the values are missing/non-finite/physically impossible. The inner
-     * diameter is snapped to the nearest standard US size for manufacturability
-     * (kept inside the detected range).
+     * when the values are missing/non-finite/physically impossible. Band width
+     * and height are clamped close to the pre-resize values ([keepBand]/[keepHeight])
+     * so the ring keeps its profile. The inner diameter is snapped to the
+     * nearest standard US size for manufacturability (kept inside the range).
      */
-    private fun validateAiFit(json: JSONObject, target: Float): AiFitResult? {
+    private fun validateAiFit(json: JSONObject, target: Float,
+                              keepBand: Float, keepHeight: Float): AiFitResult? {
         val id = json.optDouble("innerDiameterMM", Double.NaN)
         val bw = json.optDouble("bandWidthMM", Double.NaN)
         val h  = json.optDouble("heightMM", Double.NaN)
         val measured = json.optDouble("measuredInnerDiameterMM", Double.NaN)
         if (!id.isFinite() || !bw.isFinite() || !h.isFinite()) return null
-        val fId = id.toFloat(); val fBw = bw.toFloat(); val fH = h.toFloat()
+        var fId = id.toFloat(); var fBw = bw.toFloat(); var fH = h.toFloat()
         if (fId <= 0f || fBw <= 0f || fH <= 0f) return null
+        // Preserve the ring profile: band and height stay near the current
+        // (pre-resize) values — only the size changes.
+        if (keepBand > 0f) fBw = fBw.coerceIn(keepBand * 0.5f, keepBand * 2f)
+        if (keepHeight > 0f) fH = fH.coerceIn(keepHeight * 0.5f, keepHeight * 2f)
         // Physical sanity — a real ring can't have these proportions.
-        if (fBw < 0.5f || fBw > 6f) return null
-        if (fH < 0.5f || fH > 20f) return null
+        // (Floor kept low so very thin preserved bands are not rejected.)
+        if (fBw < 0.2f || fBw > 6f) return null
+        if (fH < 0.4f || fH > 20f) return null
         if (fBw >= fId * 0.45f) return null
         // The requested target must win — AI should land near it.
         val snapped = RingMath.usSizeToDiam(RingMath.diamToUSSize(fId))
@@ -922,8 +1024,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
         val h  = json.optDouble("heightMM", Double.NaN)
         return when {
             !id.isFinite() || !bw.isFinite() || !h.isFinite() -> "missing or non-numeric values"
-            bw <= 0 || bw > 6 -> "band width %.2f mm out of 0.5–6 mm".format(bw)
-            h <= 0 || h > 20 -> "height %.2f mm out of 0.5–20 mm".format(h)
+            bw <= 0 || bw > 6 -> "band width %.2f mm out of range".format(bw)
+            h <= 0 || h > 20 -> "height %.2f mm out of range".format(h)
             else -> "values outside the detected ring range"
         }
     }
@@ -1076,8 +1178,10 @@ INSTRUCTIONS:
 3. Cross-check height against Image 2 (GREEN line).
 4. The user specifies a TARGET US ring size. Use the standard formula: inner diameter (mm) = US size × 0.4064 + 12.7.
 5. Return manufacturable values: band 0.5–6 mm, height 0.5–20 mm.
-6. Never invent unsafe geometry. If the ring already matches the target, say so.
-7. Return ONLY the requested JSON — no markdown, no extra keys.
+6. US ring sizes are NEVER negative. The smallest standard US size is US 1. If any calculation gives a negative US size, clamp it to US 1 and mention it.
+7. When the user requests a SIZE change, keep band width and height UNCHANGED from the values in the prompt — only the inner diameter changes.
+8. Never invent unsafe geometry. If the ring already matches the target, say so.
+9. Return ONLY the requested JSON — no markdown, no extra keys.
 """.trimIndent()
     }
 }

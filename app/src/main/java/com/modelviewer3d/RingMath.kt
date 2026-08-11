@@ -13,16 +13,32 @@ object RingMath {
     private fun diamToUS(diaMM: Float): Float = (diaMM - 12.7f) / 0.4064f
     private fun usToDiam(us: Float): Float = us * 0.4064f + 12.7f
 
-    /** Convert an inner diameter (mm) into the closest US ring size. */
-    fun diamToUSSize(diaMM: Float): Float =
-        if (diaMM <= 0f) 0f else (diamToUS(diaMM) * 2).roundToInt() / 2f
+    /** Smallest standard US ring size we surface (below this there is no standard size). */
+    const val MIN_US_SIZE = 1f
+    /** Largest standard US ring size we surface. */
+    const val MAX_US_SIZE = 20f
+
+    /**
+     * Convert an inner diameter (mm) into the closest US ring size.
+     * US ring sizes are NEVER negative — values below US 1 clamp to US 1
+     * so tiny rings never show nonsense like "US -18".
+     */
+    fun diamToUSSize(diaMM: Float): Float {
+        if (diaMM <= 0f) return 0f
+        val us = (diamToUS(diaMM) * 2f).roundToInt() / 2f
+        return us.coerceIn(MIN_US_SIZE, MAX_US_SIZE)
+    }
 
     /** Convert a US ring size into an inner diameter (mm). */
     fun usSizeToDiam(us: Float): Float = usToDiam(us)
 
-    /** Human label: "US 7" or "—" for invalid values. */
+    /**
+     * Human label: "US 7", "below US 1" for undersized rings, "—" when invalid.
+     * Never returns a negative US size.
+     */
     fun usSizeLabel(diaMM: Float): String {
         if (diaMM <= 0f) return "—"
+        if (diamToUS(diaMM) < MIN_US_SIZE) return "below US ${MIN_US_SIZE.toInt()}"
         val us = diamToUSSize(diaMM)
         val whole = us.toInt()
         val half = us - whole
