@@ -86,7 +86,6 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private var aiButton: Button? = null
     private var selectedUsSize = 7f  // default target US size
     private var aiUsChipRow: LinearLayout? = null
-    private var aiSelectedChip: View? = null
 
     private var lastBW = -1f
     private var lastID = -1f
@@ -303,12 +302,12 @@ class RingToolFragment : BottomSheetDialogFragment() {
             val usSizes = mutableListOf<Float>()
             var s = 3f
             while (s <= 13f) { usSizes.add(s); s += 0.5f }
-            usSizes.forEach { us ->
+            usSizes.forEachIndexed { idx, us ->
                 val label = if (us == us.toInt().toFloat()) "${us.toInt()}" else "$us"
                 val chip = UISheetKit.chipButton(ctx, label, "#A78BFA", onClick = {
                     selectedUsSize = us
                     aiTargetInput?.setText(RingMath.usSizeToDiam(us).toString())
-                    highlightAiChip(it)
+                    highlightAiChipAt(idx)
                     tvStatus?.text = "→ Target: US $label (%.2f mm)".format(RingMath.usSizeToDiam(us))
                     tvStatus?.setTextColor(Color.parseColor("#A78BFA"))
                 })
@@ -969,15 +968,13 @@ class RingToolFragment : BottomSheetDialogFragment() {
         }
     }
 
-    /** Highlights the tapped chip and resets all others to default alpha. */
-    private fun highlightAiChip(selected: View) {
+    /** Highlights the chip at [idx] and dims all others. */
+    private fun highlightAiChipAt(idx: Int) {
         aiUsChipRow?.let { row ->
             for (i in 0 until row.childCount) {
-                val child = row.getChildAt(i)
-                child.alpha = if (child === selected) 1f else 0.5f
+                row.getChildAt(i).alpha = if (i == idx) 1f else 0.5f
             }
         }
-        aiSelectedChip = selected
     }
 
     // ── Long-press selection sync ─────────────────────────────────────────────
@@ -1020,7 +1017,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
         const val TAG = "RingTool"
         fun newInstance() = RingToolFragment()
 
-        private const val AI_RING_FIT_SYSTEM_PROMPT = """
+        private val AI_RING_FIT_SYSTEM_PROMPT = """
 You are AuraCAD's precise jewelry fitting assistant. You help users resize rings to specific US ring sizes.
 
 You receive TWO calibrated close-up images of a ring with dimension callouts and a 10 mm scale bar:
