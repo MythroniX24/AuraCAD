@@ -567,8 +567,9 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
         bwMin = (origBandWidthMM * 0.1f).coerceAtLeast(0.05f)
         bwMax = (origBandWidthMM * 3.5f).coerceAtMost(50f)
-        idMin = (origInnerDiaMM * 0.5f).coerceAtLeast(1f)
-        idMax = (origInnerDiaMM * 2.0f).coerceAtMost(80f)
+        // Range must cover all US ring sizes (14-22mm) even for small models
+        idMin = minOf(origInnerDiaMM * 0.5f, 8f).coerceAtLeast(1f)
+        idMax = maxOf(origInnerDiaMM * 2.0f, 25f).coerceAtMost(80f)
         hMin  = (origHeightMM * 0.3f).coerceAtLeast(0.5f)
         hMax  = (origHeightMM * 3.0f).coerceAtMost(80f)
 
@@ -703,8 +704,10 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
                 if (targetMM < idMin || targetMM > idMax) {
                     throw IllegalArgumentException(
-                        "Target $targetLabel (%.2f mm) is outside this ring's range [%.2f–%.2f mm].".format(
-                            targetMM, idMin, idMax))
+                        "Target $targetLabel (%.2f mm) is outside range [%.1f–%.1f mm]. " +
+                            "This ring's detected inner diameter is %.1f mm. " +
+                            "Try a larger US size or check the ring model.".format(
+                            targetMM, idMin, idMax, origInnerDiaMM))
                 }
 
                 // Step 3: Multi-angle vision capture
