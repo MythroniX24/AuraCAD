@@ -784,7 +784,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
                             append("Image 1 (TOP): RED = inner diameter, CYAN = band, WHITE bar = 10 mm.\n")
                             append("Image 2 (SIDE): GREEN = height, CYAN = band, WHITE bar = 10 mm.\n")
                             append("Check: Does the ring look proportionally correct? Is the inner diameter approximately ${"%.1f".format(safeId)} mm using the scale bar? Are there any visual artifacts or distortions?\n")
-                            append("Return JSON: {\"valid\": true/false, \"actualInnerDiameterMM\": number, \"assessment\": "short description of what you see"}")
+                            append("Return JSON: {\"valid\": true/false, \"actualInnerDiameterMM\": number, \"assessment\": "brief assessment"}")
                         }
                         val verifyReply = GeminiClient.generate(
                             apiKey = key,
