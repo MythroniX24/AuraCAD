@@ -765,6 +765,48 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 proportional = wasProportional
                 activity?.runOnUiThread { updateInfo(); updatePreview() }
 
+                // Step 5.5: Post-change verification — re-capture and ask
+                // Gemini to confirm the ring looks correct after resizing.
+                setAiStatus("🔍 Verifying resized ring…", "#FFD54F")
+                var verificationNote = ""
+                try {
+                    // Small delay so the native deformation finishes rendering
+                    kotlinx.coroutines.delay(250)
+                    val verifyTop = withContext(Dispatchers.IO) {
+                        captureRingInspectionBase64(0) ?: capturePreviewBase64()
+                    }
+                    val verifySide = withContext(Dispatchers.IO) { captureRingInspectionBase64(1) }
+                    val verifyImages = listOfNotNull(verifyTop, verifySide)
+                    if (verifyImages.isNotEmpty()) {
+                        val verifyPrompt = buildString {
+                            append("VERIFICATION: The ring was just resized to $targetLabel (${"%.2f".format(targetMM)} mm inner diameter).\n")
+                            append("Expected: inner≈${"%.2f".format(safeId)} mm, band≈${"%.2f".format(safeBw)} mm, height≈${"%.2f".format(safeH)} mm.\n")
+                            append("Image 1 (TOP): RED = inner diameter, CYAN = band, WHITE bar = 10 mm.\n")
+                            append("Image 2 (SIDE): GREEN = height, CYAN = band, WHITE bar = 10 mm.\n")
+                            append("Check: Does the ring look proportionally correct? Is the inner diameter approximately ${"%.1f".format(safeId)} mm using the scale bar? Are there any visual artifacts or distortions?\n")
+                            append("Return JSON: {\"valid\": true/false, \"actualInnerDiameterMM\": number, \"assessment\": "short description of what you see"}")
+                        }
+                        val verifyReply = GeminiClient.generate(
+                            apiKey = key,
+                            systemPrompt = "You are verifying a ring resize. Inspect the images and confirm the ring looks correct after resizing. Use the white 10mm bar for scale.",
+                            userPrompt = verifyPrompt,
+                            pngBase64 = verifyImages.firstOrNull(),
+                            extraImages = verifyImages.drop(1),
+                            model = AiPrefs.model(ctx)
+                        )
+                        val vJson = parseAiFit(verifyReply.text)
+                        val isValid = vJson.optBoolean("valid", true)
+                        val actualDia = vJson.optDouble("actualInnerDiameterMM", Double.NaN)
+                        val assessment = vJson.optString("assessment", "")
+                        verificationNote = if (isValid) {
+                            val diaStr = if (actualDia.isFinite()) "%.1f".format(actualDia.toFloat()) else "?"
+                            "\n✅ Verified: ~$diaStr mm — $assessment"
+                        } else {
+                            "\n⚠️ Verification: $assessment"
+                        }
+                    }
+                } catch (_: Exception) { /* verification is best-effort */ }
+
                 // Step 6: Before → After comparison
                 val afterUsLabel = RingMath.usSizeLabel(safeId)
                 val delta = safeId - beforeMM
@@ -781,6 +823,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
                     append("Band: ${"%.2f".format(beforeBW)} → ${"%.2f".format(safeBw)} mm · ")
                     append("Height: ${"%.2f".format(beforeH)} → ${"%.2f".format(safeH)} mm")
                     if (aiCheck.isNotEmpty()) append(aiCheck)
+                    if (verificationNote.isNotEmpty()) append(verificationNote)
                     append("\n💡 $lastReason")
                 }
                 setAiStatus(msg, "#4CAF82")
