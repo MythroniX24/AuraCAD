@@ -1510,9 +1510,11 @@ bool Renderer::export3DS(const std::string& path) const {
                           const std::vector<Vec3>& verts,
                           const std::vector<uint16_t>& idx) {
         std::vector<uint8_t> objData;   // 0x4000 content: name + 0x4100
+        // 3DS object name is a plain null-terminated ASCII string with NO
+        // even-length padding (per spec). Writing a pad byte here desyncs
+        // spec-compliant readers, so emit just the NUL terminator.
         for (char ch : name) objData.push_back((uint8_t)ch);
         objData.push_back(0);
-        if (objData.size() & 1) objData.push_back(0);   // pad name to even length
 
         std::vector<uint8_t> triData;   // 0x4100 content: 0x4110 + 0x4120
         {

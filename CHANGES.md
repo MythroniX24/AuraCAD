@@ -1,3 +1,32 @@
+# 3DS / 3DM import fixes (2026-09-04)
+
+Two loader bugs made many `.3ds` and `.3dm` files import broken (missing
+geometry or huge stray triangles):
+
+1. **3DS loader desynced on object names → model imported empty/broken.**
+   `Chunk3DS::name()` had a non-spec *"pad to even length"* step
+   (`if(offset() & 1) ++p;`). Real 3DS files (Blender, 3ds Max, …) do **not**
+   pad the `0x4000` object name — it is a plain null-terminated string followed
+   immediately by sub-chunks. Whenever a name ended at an odd file offset, the
+   parser swallowed the first byte of the next sub-chunk header, desynced, and
+   read the mesh back as **zero vertices**, so the model appeared broken.
+   Removed the pad step; the matching pad byte was also removed from
+   `export3DS()` so AuraCAD keeps writing spec-compliant files. Verified with a
+   standalone round-trip harness across every name-length parity (single and
+   multi-object). Files: `app/src/main/cpp/model_loader.cpp` (`Chunk3DS::name`),
+   `app/src/main/cpp/renderer.cpp` (`export3DS`).
+
+2. **3DM Brep import ignored trim curves → giant stray triangles.**
+   For NURBS Breps the loader tessellated each face's **untrimmed** surface
+   grid, so trimmed regions (holes, cutouts, non-rectangular faces) were filled
+   with huge triangles spanning the whole surface domain — the "broken" look.
+   `load3DM` now prefers the **cached render mesh** Rhino stores per face
+   (`ON_BrepFace::Mesh(ON::render_mesh)`, which respects trims) and only falls
+   back to iso-grid tessellation when no cached mesh exists.
+   File: `app/src/main/cpp/model_loader.cpp` (`load3DM`).
+
+---
+
 # Resize/Export quality fixes (2026-09-04)
 
 Resizing a model or mesh never touches vertex data — it only sets scale

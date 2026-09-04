@@ -451,10 +451,16 @@ struct Chunk3DS {
     float    f32(){ if(p+4>end) return 0; float v; memcpy(&v,p,4); p+=4; return v; }
     size_t offset() const { return (size_t)(p-base); }
     std::string name(){
+        // 3DS object names (0x4000) are a plain null-terminated ASCII string,
+        // immediately followed by the object's sub-chunks. There is NO padding
+        // to even byte alignment in the 3DS spec. A previous "pad to even
+        // length" step (if(offset()&1) ++p) desynced the parser on real files
+        // exported by Blender / 3ds Max whenever the name ended at an odd
+        // offset — it swallowed the low byte of the next sub-chunk header, so
+        // the mesh read back as zero vertices and the model appeared broken.
         std::string s;
         while(p<end && *p) s.push_back((char)*p++);
-        if(p<end) ++p;                 // NUL
-        if(offset() & 1) ++p;          // legacy padding to even length
+        if(p<end) ++p;                 // consume the terminating NUL only
         return s;
     }
     void skip(size_t n){ p+=n; if(p>end) p=end; }
@@ -651,7 +657,18 @@ bool ModelLoader::load3DM(const std::string& path, ModelData& data) {
         } else if (const ON_Brep* brep = ON_Brep::Cast(geo)) {
             for (int fi = 0; fi < brep->m_F.Count(); ++fi) {
                 const ON_BrepFace& face = brep->m_F[fi];
-                tessellateSurface(&face, modelDiag, data.vertices, data.indices);
+                // Prefer the cached render mesh Rhino stores with each face:
+                // it already honours the face's TRIM curves (holes, cutouts,
+                // non-rectangular boundaries). The iso-grid fallback samples the
+                // UNTRIMMED surface, which produces huge stray triangles across
+                // trimmed regions — the "broken" look on many 3dm imports.
+                const ON_Mesh* fm = face.Mesh(ON::render_mesh);
+                if (!fm) fm = face.Mesh(ON::any_mesh);
+                if (fm && fm->m_V.Count() > 0 && fm->m_F.Count() > 0) {
+                    addOnMesh(fm, data.vertices, data.indices);
+                } else {
+                    tessellateSurface(&face, modelDiag, data.vertices, data.indices);
+                }
             }
         } else if (const ON_Surface* surf = ON_Surface::Cast(geo)) {
             // Also covers ON_Polysurface and ON_Extrusion (both derive ON_Surface)
