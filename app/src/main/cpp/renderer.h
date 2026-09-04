@@ -149,7 +149,8 @@ public:
      *  global transform according to m_gizmoMode. */
     /** Returns gizmo axis 0..2 under screen coords, or -1 when no gizmo handle is hit. */
     int  hitTestGizmo(float sx, float sy, float sw, float sh) const;
-    void gizmoDrag(float dx, float dy, bool start);
+    void gizmoDrag(float dx, float dy, int axis, bool start);
+    void gizmoDragEnd() { m_gizActiveAxis = -1; }  // clear handle highlight
 
     // Global transform
     void setRotation(float x,float y,float z);
@@ -295,6 +296,7 @@ private:
     // has to re-scan every mesh vertex again on the interaction thread.
     float  m_gizAnchorCx=0.f, m_gizAnchorCy=0.f, m_gizAnchorCz=0.f, m_gizAnchorSize=0.f;
     bool   m_gizAnchorValid=false;
+    int    m_gizActiveAxis=-1;   // axis currently being dragged (for highlight)
     void   drawGizmo(const Mat4& proj, const Mat4& view);
 
     // Cached uniform locations — avoids glGetUniformLocation every frame

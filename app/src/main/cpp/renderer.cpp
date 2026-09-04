@@ -282,7 +282,14 @@ void Renderer::drawGizmo(const Mat4& proj,const Mat4& view){
     static const float kCols[3][3]={{1.0f,0.25f,0.25f},{0.25f,1.0f,0.3f},{0.3f,0.6f,1.0f}};
     for(int a=0;a<3;++a){
         if(m_gizAxisCount[a]<=0) continue;
-        glUniform4f(m_uloc.wireColor,kCols[a][0],kCols[a][1],kCols[a][2],1.0f);
+        if(a==m_gizActiveAxis){
+            // Active handle: bright yellow + thicker so the grabbed axis is obvious.
+            glUniform4f(m_uloc.wireColor,1.0f,0.95f,0.2f,1.0f);
+            glLineWidth(4.5f);
+        } else {
+            glUniform4f(m_uloc.wireColor,kCols[a][0],kCols[a][1],kCols[a][2],1.0f);
+            glLineWidth(2.5f);
+        }
         glDrawArrays(GL_LINES,m_gizAxisOffset[a],m_gizAxisCount[a]);
     }
     glBindVertexArray(0);
@@ -386,36 +393,97 @@ int Renderer::hitTestGizmo(float sx,float sy,float sw,float sh) const {
 }
 
 // One-finger drag while a gizmo tool is active.  start=true = push one undo
-// snapshot and return; subsequent calls stream deltas on the GLOBAL transform.
-void Renderer::gizmoDrag(float dx,float dy,bool start){
+// snapshot and return; subsequent calls stream deltas constrained to [axis]
+// (0=X, 1=Y, 2=Z).  axis<0 falls back to the old screen-plane / uniform mode.
+void Renderer::gizmoDrag(float dx,float dy,int axis,bool start){
     if(m_gizmoMode<=0) return;
+    m_gizActiveAxis=axis;              // highlight the handle being manipulated
     if(start){ pushUndoState(); return; }
+
+    // ── Project the anchor + the picked world axis to screen space ───────────
+    // Moving `m_gizAnchorSize` world units along the axis maps to a pixel
+    // vector on screen; we drag ALONG that vector so motion tracks the finger.
+    const float sw=(float)std::max(m_width,1), sh=(float)std::max(m_height,1);
+    Vec3 axisDir{axis==0?1.f:0.f, axis==1?1.f:0.f, axis==2?1.f:0.f};
+
+    bool haveScreenAxis=false;
+    float auX=0.f, auY=0.f, axPixLen=0.f;   // unit screen-axis dir + its length
+    if(axis>=0 && axis<3 && m_gizAnchorValid && m_gizAnchorSize>1e-6f){
+        const float aspect=sw/std::max(sh,1.f);
+        Mat4 proj=Mat4::perspective(60.f*DEG2RAD,aspect,0.01f,100.f);
+        Vec3 eye=cameraEye();
+        Mat4 view=Mat4::lookAt(eye,{m_panX,m_panY,0},{0,1,0});
+        auto toScreen=[&](float x,float y,float z,float& ox,float& oy)->bool{
+            float vx=view.m[0]*x+view.m[4]*y+view.m[8]*z+view.m[12];
+            float vy=view.m[1]*x+view.m[5]*y+view.m[9]*z+view.m[13];
+            float vz=view.m[2]*x+view.m[6]*y+view.m[10]*z+view.m[14];
+            float px=proj.m[0]*vx+proj.m[4]*vy+proj.m[8]*vz+proj.m[12];
+            float py=proj.m[1]*vx+proj.m[5]*vy+proj.m[9]*vz+proj.m[13];
+            float pw=proj.m[3]*vx+proj.m[7]*vy+proj.m[11]*vz+proj.m[15];
+            if(pw<=1e-5f) return false;
+            ox=(px/pw+1.f)*0.5f*sw;
+            oy=(1.f-py/pw)*0.5f*sh;
+            return true;
+        };
+        float s0x,s0y,s1x,s1y;
+        float ex=m_gizAnchorCx+axisDir.x*m_gizAnchorSize;
+        float ey=m_gizAnchorCy+axisDir.y*m_gizAnchorSize;
+        float ez=m_gizAnchorCz+axisDir.z*m_gizAnchorSize;
+        if(toScreen(m_gizAnchorCx,m_gizAnchorCy,m_gizAnchorCz,s0x,s0y) &&
+           toScreen(ex,ey,ez,s1x,s1y)){
+            float vX=s1x-s0x, vY=s1y-s0y;
+            axPixLen=std::sqrt(vX*vX+vY*vY);
+            if(axPixLen>1.f){ auX=vX/axPixLen; auY=vY/axPixLen; haveScreenAxis=true; }
+        }
+    }
+    // Signed finger travel projected onto the screen-space axis (pixels).
+    float along = haveScreenAxis ? (dx*auX+dy*auY) : dx;
+
     const float k = 2.0f*m_camDist/(float)std::max(m_height,1);
-    if(m_gizmoMode==1){ // MOVE — translate in the camera's right/up plane
-        float cp=cosf(m_camPitch),sp=sinf(m_camPitch);
-        float cy=cosf(m_camYaw), sy=sinf(m_camYaw);
-        Vec3 fwd{cp*sy,sp,cp*cy};
-        Vec3 up{0,1,0};
-        Vec3 right=fwd.cross(up).normalized();
-        Vec3 upw=up - fwd*up.dot(fwd);
-        upw=upw.normalized();
-        Vec3 d = right*(dx*k) - upw*(dy*k);
-        m_posX+=d.x; m_posY+=d.y; m_posZ+=d.z;
-    } else if(m_gizmoMode==2){ // ROTATE — yaw around world Y, pitch around view axis
-        m_rotY+=dx*0.4f;
-        m_rotX-=dy*0.4f;
-        m_rotX=std::fmodf(m_rotX+180.f,360.f); if(m_rotX<0) m_rotX+=360.f; m_rotX-=180.f;
-        m_rotY=std::fmodf(m_rotY+180.f,360.f); if(m_rotY<0) m_rotY+=360.f; m_rotY-=180.f;
-    } else if(m_gizmoMode==3){ // SCALE — uniform by vertical drag
-        float f=1.0f+dy*0.01f;
-        if(f<0.95f) f=0.95f;
-        if(f>1.05f) f=1.05f;
-        m_scaX*=f; m_scaY*=f; m_scaZ*=f;
-        float m=std::max(std::fabsf(m_scaX),std::max(std::fabsf(m_scaY),std::fabsf(m_scaZ)));
-        if(m>8.0f){ float r=8.0f/m; m_scaX*=r;m_scaY*=r;m_scaZ*=r; }
-        if(m<0.02f){ float r=0.02f/m; m_scaX*=r;m_scaY*=r;m_scaZ*=r; }
+
+    if(m_gizmoMode==1){ // ── MOVE — translate along the picked world axis ─────
+        if(haveScreenAxis){
+            // px→world: size world units span axPixLen px along this axis.
+            float world = along / axPixLen * m_gizAnchorSize;
+            m_posX+=axisDir.x*world; m_posY+=axisDir.y*world; m_posZ+=axisDir.z*world;
+        } else if(axis>=0 && axis<3){
+            m_posX+=axisDir.x*along*k; m_posY+=axisDir.y*along*k; m_posZ+=axisDir.z*along*k;
+        } else { // legacy screen-plane fallback
+            float cp=cosf(m_camPitch),sp=sinf(m_camPitch);
+            float cyw=cosf(m_camYaw), syw=sinf(m_camYaw);
+            Vec3 fwd{cp*syw,sp,cp*cyw}, up{0,1,0};
+            Vec3 right=fwd.cross(up).normalized();
+            Vec3 upw=(up - fwd*up.dot(fwd)).normalized();
+            Vec3 d = right*(dx*k) - upw*(dy*k);
+            m_posX+=d.x; m_posY+=d.y; m_posZ+=d.z;
+        }
+    } else if(m_gizmoMode==2){ // ── ROTATE — about the picked axis only ───────
+        // Drag PERPENDICULAR to the axis' screen projection spins its ring.
+        float amount;
+        if(haveScreenAxis){ float pX=-auY, pY=auX; amount=dx*pX+dy*pY; }
+        else               { amount=dx+dy; }
+        const float degPerPx=0.4f;
+        float* r = (axis==0)?&m_rotX : (axis==1)?&m_rotY : &m_rotZ;
+        if(axis<0||axis>2){ // legacy yaw+pitch fallback
+            m_rotY+=dx*degPerPx; m_rotX-=dy*degPerPx; r=nullptr;
+        } else {
+            *r += amount*degPerPx;
+        }
+        auto wrap=[](float& a){ a=std::fmodf(a+180.f,360.f); if(a<0)a+=360.f; a-=180.f; };
+        wrap(m_rotX); wrap(m_rotY); wrap(m_rotZ);
+    } else if(m_gizmoMode==3){ // ── SCALE — along the picked axis only ────────
+        float f=1.0f+along*0.01f;
+        if(f<0.9f) f=0.9f;
+        if(f>1.1f) f=1.1f;
+        if(axis==0)      m_scaX*=f;
+        else if(axis==1) m_scaY*=f;
+        else if(axis==2) m_scaZ*=f;
+        else { m_scaX*=f; m_scaY*=f; m_scaZ*=f; } // legacy uniform fallback
+        auto clampS=[&](float& s){ if(s>8.f)s=8.f; if(s<0.02f)s=0.02f; if(s>-0.02f&&s<0.f)s=-0.02f; };
+        clampS(m_scaX); clampS(m_scaY); clampS(m_scaZ);
     }
 }
+
 
 void Renderer::buildShaders(){
     if(m_mainProg) glDeleteProgram(m_mainProg);

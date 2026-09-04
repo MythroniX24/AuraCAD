@@ -1,3 +1,35 @@
+# Transform gizmo — axis-constrained Move / Rotate / Scale (2026-09-04)
+
+Fixed the Move/Rotate/Scale gizmo: dragging a handle now actually respects the
+axis you grabbed.
+
+**Bug:** `hitTestGizmo` correctly detected which axis handle (X/Y/Z) the finger
+was on, but the result was never passed to `gizmoDrag`, which ignored the axis
+entirely — Move always translated in the screen plane, Rotate always did a fixed
+yaw+pitch, and Scale was always uniform, regardless of which handle you touched.
+The coloured handles were effectively decorative.
+
+**Fix:**
+1. Thread the picked axis through JNI (`nativeGizmoDrag(dx, dy, axis, start)`)
+   into the native `gizmoDrag`.
+2. Axis-constrained dragging, screen-accurate: the picked world axis is projected
+   to screen space and the finger delta is projected onto it, so
+   - **Move** translates only along X/Y/Z and tracks the finger 1:1 in world units;
+   - **Rotate** spins only about the grabbed axis (drag perpendicular to its
+     on-screen ring);
+   - **Scale** scales only along the grabbed axis.
+   The old free-form behaviour is kept as a fallback when no axis is picked.
+3. **Active-handle highlight:** the axis being dragged turns bright yellow and
+   thicker, and clears on release (`nativeGizmoDragEnd`), so it's obvious which
+   axis is engaged.
+
+Files: `app/src/main/cpp/renderer.cpp`, `app/src/main/cpp/renderer.h`,
+`app/src/main/cpp/jni_bridge.cpp`,
+`app/src/main/java/com/modelviewer3d/NativeLib.kt`,
+`app/src/main/java/com/modelviewer3d/ModelGLSurfaceView.kt`.
+
+---
+
 # Ring Tool — accurate measurement (bore circle fit + quality) (2026-09-04)
 
 Upgraded ring **measurement** accuracy and added a trust signal. Full write-up in

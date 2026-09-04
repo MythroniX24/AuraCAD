@@ -155,8 +155,11 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeHitTestGizmo(JNIEn
     if(!g_renderer) return -1;
     return (jint)g_renderer->hitTestGizmo((float)sx,(float)sy,(float)sw,(float)sh);
 }
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDrag(JNIEnv*,jclass,jfloat dx,jfloat dy,jboolean start){
-    LOCK_OR_VOID(); g_renderer->gizmoDrag((float)dx,(float)dy,start==JNI_TRUE);
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDrag(JNIEnv*,jclass,jfloat dx,jfloat dy,jint axis,jboolean start){
+    LOCK_OR_VOID(); g_renderer->gizmoDrag((float)dx,(float)dy,(int)axis,start==JNI_TRUE);
+}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDragEnd(JNIEnv*,jclass){
+    LOCK_OR_VOID(); g_renderer->gizmoDragEnd();
 }
 
 // ── Transform ────────────────────────────────────────────────────────────────
