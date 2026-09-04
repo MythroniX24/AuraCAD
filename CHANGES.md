@@ -1,3 +1,182 @@
+# Transform gizmo — axis-constrained Move / Rotate / Scale (2026-09-04)
+
+Fixed the Move/Rotate/Scale gizmo: dragging a handle now actually respects the
+axis you grabbed.
+
+**Bug:** `hitTestGizmo` correctly detected which axis handle (X/Y/Z) the finger
+was on, but the result was never passed to `gizmoDrag`, which ignored the axis
+entirely — Move always translated in the screen plane, Rotate always did a fixed
+yaw+pitch, and Scale was always uniform, regardless of which handle you touched.
+The coloured handles were effectively decorative.
+
+**Fix:**
+1. Thread the picked axis through JNI (`nativeGizmoDrag(dx, dy, axis, start)`)
+   into the native `gizmoDrag`.
+2. Axis-constrained dragging, screen-accurate: the picked world axis is projected
+   to screen space and the finger delta is projected onto it, so
+   - **Move** translates only along X/Y/Z and tracks the finger 1:1 in world units;
+   - **Rotate** spins only about the grabbed axis (drag perpendicular to its
+     on-screen ring);
+   - **Scale** scales only along the grabbed axis.
+   The old free-form behaviour is kept as a fallback when no axis is picked.
+3. **Active-handle highlight:** the axis being dragged turns bright yellow and
+   thicker, and clears on release (`nativeGizmoDragEnd`), so it's obvious which
+   axis is engaged.
+
+Files: `app/src/main/cpp/renderer.cpp`, `app/src/main/cpp/renderer.h`,
+`app/src/main/cpp/jni_bridge.cpp`,
+`app/src/main/java/com/modelviewer3d/NativeLib.kt`,
+`app/src/main/java/com/modelviewer3d/ModelGLSurfaceView.kt`.
+
+---
+
+# Ring Tool — accurate measurement (bore circle fit + quality) (2026-09-04)
+
+Upgraded ring **measurement** accuracy and added a trust signal. Full write-up in
+`docs/ring-tool-architecture.md`.
+
+1. **Least-squares bore circle fit (native).** `analyzeRing` previously estimated
+   the inner radius from a single percentile of radial distances — robust but
+   unable to detect an oval/off-center bore and biased by inner chamfers. A new
+   pass projects the bore-shell vertices to the ring plane and fits a circle
+   (Kåsa algebraic least-squares). It yields a truer mean radius, re-centers the
+   bore center so deformation is symmetric about the real hole, and produces
+   **roundness (RMS residual), min/max bore diameter, ovality %, and a
+   confidence score**. Guarded with a fallback to the percentile radius, so
+   detection never regresses. Resize stays exact.
+2. **Wider params contract.** `getRingParams` now returns 12 floats (old 0–5
+   unchanged; 6–11 add the quality metrics). New pure `RingSizeEngine.Quality`
+   wraps them with an EXCELLENT/GOOD/FAIR/POOR tier + `isRound`.
+3. **Quality shown in the UI.** The detection summary now shows inner
+   circumference and a colour-coded measurement-quality line, and warns with the
+   min/max bore diameter when the bore is out of round.
+4. **US presets derive from `RingMath`** (removed the stale hard-coded diameter
+   table so presets always match the corrected formula and the AI target).
+5. **Tests:** `RingSizeEngineTest` now covers the quality tiers + `isRound`.
+
+Files: `app/src/main/cpp/renderer.cpp`, `app/src/main/cpp/renderer.h`,
+`app/src/main/cpp/jni_bridge.cpp`,
+`app/src/main/java/com/modelviewer3d/RingSizeEngine.kt`,
+`app/src/main/java/com/modelviewer3d/RingToolFragment.kt`,
+`app/src/test/java/com/modelviewer3d/RingSizeEngineTest.kt`,
+`docs/ring-tool-architecture.md` (new).
+
+---
+
+# AI Ring Size Changer — accurate + optimized (deterministic-first) (2026-09-04)
+
+Redesigned the AI ring-size changer so sizing is **exact and instant**, and the
+AI is demoted to an optional structural check. Full write-up in
+`docs/ring-size-changer-architecture.md`.
+
+1. **Fixed the root-cause accuracy bug: wrong US↔mm formula.** `RingMath` used
+   `inner_mm = US × 0.4064 + 12.7`, a slope ~2× too shallow — "US 7" targeted
+   15.5 mm instead of 17.3 mm (off by up to 3.8 mm at US 12), and correctly-sized
+   rings were mislabelled by several sizes. Now `US × 0.8128 + 11.632`, the
+   least-squares fit of AuraCAD's own preset table (< 0.05 mm error). US sizes
+   still clamp to `[1, 20]` so they are never negative.
+2. **Sizing no longer goes through AI vision.** The native renderer already
+   measures the ring exactly (`analyzeRing`) and resizes exactly from `origVerts`
+   (`applyCombinedRingDeformation`). The new flow: **measure → compute exact plan
+   → apply → re-measure & verify (mm) → optional structural AI check.** Gemini
+   round-trips per resize drop from **up to 5 → 0 (offline) or 1**; the resize is
+   instant and works with no API key.
+3. **New pure, JVM-testable core `RingSizeEngine`** computes the exact target
+   diameter, preserves & clamps band/height, and verifies the achieved geometry.
+   The optional Gemini call (`inspectStructure`) only judges structural integrity
+   and can never alter dimensions.
+4. **Tests:** `RingMathTest` locks the conversion to the preset table;
+   `RingSizeEngineTest` covers plan/preserve/clamp/verify.
+
+Files: `app/src/main/java/com/modelviewer3d/RingMath.kt`,
+`app/src/main/java/com/modelviewer3d/RingSizeEngine.kt` (new),
+`app/src/main/java/com/modelviewer3d/RingToolFragment.kt`,
+`app/src/test/java/com/modelviewer3d/RingMathTest.kt` (new),
+`app/src/test/java/com/modelviewer3d/RingSizeEngineTest.kt` (new),
+`docs/ring-size-changer-architecture.md` (new).
+
+---
+
+# Ring Tool — AI Ring Fit UI fixes (2026-09-04)
+
+Fixed a UI glitch on the Ring Tool screen in the AI ring-size selector, plus
+related polish:
+
+1. **AI target-size chips overflowed off-screen (the glitch).** The "AI RING
+   FIT" card built 21 US-size chips (US 3 → 13, step 0.5 ≈ 1218 dp) in a plain
+   horizontal `LinearLayout` that lived inside a *vertical* `ScrollView`, so on a
+   normal phone width every size past ~US 6 was clipped/unreachable and the
+   selection looked broken. The chip row is now wrapped in a
+   `HorizontalScrollView` so all sizes scroll into reach.
+2. **"QUICK US SIZES" preset row had the same overflow** — also wrapped in a
+   `HorizontalScrollView`; its section header + row now show/hide together.
+3. **Selected chip was barely visible** — highlight used alpha only. It now
+   swaps to a violet-accented selected background (`bg_chip_selected_violet`)
+   with white text, and the default target (US 7) is highlighted on open.
+4. **Chips stayed tappable during an AI run** — target chips + the analyze
+   button are now disabled while Gemini is working and re-enabled in `finally`.
+
+Files: `app/src/main/java/com/modelviewer3d/RingToolFragment.kt`,
+`app/src/main/res/drawable/bg_chip_selected_violet.xml` (new).
+
+---
+
+# 3DS / 3DM import fixes (2026-09-04)
+
+Two loader bugs made many `.3ds` and `.3dm` files import broken (missing
+geometry or huge stray triangles):
+
+1. **3DS loader desynced on object names → model imported empty/broken.**
+   `Chunk3DS::name()` had a non-spec *"pad to even length"* step
+   (`if(offset() & 1) ++p;`). Real 3DS files (Blender, 3ds Max, …) do **not**
+   pad the `0x4000` object name — it is a plain null-terminated string followed
+   immediately by sub-chunks. Whenever a name ended at an odd file offset, the
+   parser swallowed the first byte of the next sub-chunk header, desynced, and
+   read the mesh back as **zero vertices**, so the model appeared broken.
+   Removed the pad step; the matching pad byte was also removed from
+   `export3DS()` so AuraCAD keeps writing spec-compliant files. Verified with a
+   standalone round-trip harness across every name-length parity (single and
+   multi-object). Files: `app/src/main/cpp/model_loader.cpp` (`Chunk3DS::name`),
+   `app/src/main/cpp/renderer.cpp` (`export3DS`).
+
+2. **3DM Brep import ignored trim curves → giant stray triangles.**
+   For NURBS Breps the loader tessellated each face's **untrimmed** surface
+   grid, so trimmed regions (holes, cutouts, non-rectangular faces) were filled
+   with huge triangles spanning the whole surface domain — the "broken" look.
+   `load3DM` now prefers the **cached render mesh** Rhino stores per face
+   (`ON_BrepFace::Mesh(ON::render_mesh)`, which respects trims) and only falls
+   back to iso-grid tessellation when no cached mesh exists.
+   File: `app/src/main/cpp/model_loader.cpp` (`load3DM`).
+
+---
+
+# Resize/Export quality fixes (2026-09-04)
+
+Resizing a model or mesh never touches vertex data — it only sets scale
+factors on a transform matrix, so no polygons are lost at resize time. The
+perceived "quality/poly-count loss after resizing + exporting" came from two
+separate bugs, now fixed:
+
+1. **Non-uniform scale skewed surface normals → model looked faceted/ugly.**
+   `Mat4::toNormalMatrix()` used the raw upper-left 3×3 of the model matrix
+   (its comment even said *"assumes uniform scale"*). Under non-uniform W/H/D
+   resize this tilts every normal, breaking lighting both in the live viewport
+   **and** in exported normals. It now computes the correct **inverse-transpose**
+   3×3 normal matrix. Exporters (OBJ/PLY/GLB) now transform normals through
+   that matrix via the new `applyNormalMat3()` helper instead of the raw 3×3.
+   Files: `app/src/main/cpp/math_utils.h`, `app/src/main/cpp/renderer.cpp`.
+
+2. **3DS export silently dropped meshes > 65 535 vertices → fewer polys, smaller
+   file.** `export3DS()` had `if (mo.vertices.size() > 65535) continue;` because
+   the 3DS format uses 16-bit vertex indices — so any detailed mesh vanished
+   entirely from the exported file. It now **splits** large meshes into multiple
+   3DS sub-objects (each re-indexed within the u16 limit) so the full geometry
+   survives the export. File: `app/src/main/cpp/renderer.cpp` (`export3DS`).
+
+No public Kotlin/JNI API changed.
+
+---
+
 # Phase 1 — Stability, Performance & Build Pipeline
 
 This document lists every change made for the Phase 1 hardening pass. Nothing

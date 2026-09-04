@@ -6,12 +6,27 @@ import kotlin.math.roundToInt
 /**
  * Ring sizing math (mm) — used by the Ring Tool screen.
  *  US size ↔ inner diameter conversions follow the standard
- *  (US) = (inner diameter in mm − 12.7) / 0.4064, clamped to sane bounds.
+ *  innerDiameterMM = US × 0.8128 + 11.632 (see constants below), clamped to
+ *  sane bounds so a US size is never negative.
  */
 object RingMath {
 
-    private fun diamToUS(diaMM: Float): Float = (diaMM - 12.7f) / 0.4064f
-    private fun usToDiam(us: Float): Float = us * 0.4064f + 12.7f
+    // US ring size ↔ inner diameter (mm).
+    //
+    //   innerDiameterMM = US × US_SLOPE + US_INTERCEPT
+    //
+    // The correct standard (ISO 8653-based US sizing, ~2.55 mm circumference per
+    // whole size ⇒ ~0.8128 mm diameter per size) has slope 0.8128. These two
+    // constants are the least-squares fit of AuraCAD's own US preset table and
+    // reproduce it to < 0.05 mm (e.g. US 7 → 17.32 mm, US 12 → 21.39 mm).
+    // The previous formula (slope 0.4064, intercept 12.7) made every size ~2×
+    // too shallow — US 7 came out 15.5 mm instead of 17.3 mm and real rings were
+    // mislabelled by several sizes.
+    private const val US_SLOPE = 0.8128f
+    private const val US_INTERCEPT = 11.632f
+
+    private fun diamToUS(diaMM: Float): Float = (diaMM - US_INTERCEPT) / US_SLOPE
+    private fun usToDiam(us: Float): Float = us * US_SLOPE + US_INTERCEPT
 
     /** Smallest standard US ring size we surface (below this there is no standard size). */
     const val MIN_US_SIZE = 1f
