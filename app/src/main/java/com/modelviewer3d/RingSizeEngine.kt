@@ -34,6 +34,44 @@ object RingSizeEngine {
         val usLabel: String get() = RingMath.usSizeLabel(innerDiameterMM)
     }
 
+    /**
+     * Measurement quality from the native least-squares bore circle fit.
+     * Lets the UI tell the user how trustworthy the detected size is and flag
+     * out-of-round meshes before they resize.
+     */
+    data class Quality(
+        val roundnessMM: Float,   // RMS residual of the circle fit (mm) — lower is better
+        val minBoreDiaMM: Float,  // smallest bore diameter (mm)
+        val maxBoreDiaMM: Float,  // largest  bore diameter (mm)
+        val ovalityPct: Float,    // (max - min) / fitted * 100
+        val confidence: Float,    // 0..1 overall measurement confidence
+        val pointCount: Int,      // vertices used in the fit
+    ) {
+        /** Coarse tier for colour-coding + wording in the UI. */
+        enum class Tier { EXCELLENT, GOOD, FAIR, POOR }
+
+        val tier: Tier get() = when {
+            confidence >= 0.85f && ovalityPct <= 1.5f -> Tier.EXCELLENT
+            confidence >= 0.65f && ovalityPct <= 4f   -> Tier.GOOD
+            confidence >= 0.4f  && ovalityPct <= 8f   -> Tier.FAIR
+            else                                       -> Tier.POOR
+        }
+
+        /** True when the bore is round enough to trust a single-diameter size. */
+        val isRound: Boolean get() = ovalityPct <= 4f
+
+        fun summary(): String {
+            val t = when (tier) {
+                Tier.EXCELLENT -> "Excellent"
+                Tier.GOOD -> "Good"
+                Tier.FAIR -> "Fair"
+                Tier.POOR -> "Poor"
+            }
+            return "%s fit · %.0f%% confidence · %.1f%% ovality".format(
+                t, confidence * 100f, ovalityPct)
+        }
+    }
+
     /** Hard manufacturability + detected-range limits for a given ring. */
     data class Limits(
         val idMin: Float, val idMax: Float,

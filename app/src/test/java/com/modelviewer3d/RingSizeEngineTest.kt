@@ -74,4 +74,27 @@ class RingSizeEngineTest {
             as RingSizeEngine.Result.Ok).plan
         assertEquals(18.0f, plan.targetInnerDiameterMM, 0.01f)
     }
+
+    private fun quality(conf: Float, ovality: Float, pts: Int = 300) =
+        RingSizeEngine.Quality(
+            roundnessMM = 0.02f, minBoreDiaMM = 17f, maxBoreDiaMM = 17.3f,
+            ovalityPct = ovality, confidence = conf, pointCount = pts)
+
+    @Test
+    fun `quality tiers reflect confidence and ovality`() {
+        assertEquals(RingSizeEngine.Quality.Tier.EXCELLENT,
+            quality(0.95f, 0.5f).tier)
+        assertEquals(RingSizeEngine.Quality.Tier.GOOD,
+            quality(0.7f, 3f).tier)
+        assertEquals(RingSizeEngine.Quality.Tier.FAIR,
+            quality(0.5f, 6f).tier)
+        assertEquals(RingSizeEngine.Quality.Tier.POOR,
+            quality(0.2f, 20f).tier)
+    }
+
+    @Test
+    fun `isRound flags out-of-round bores`() {
+        assertTrue(quality(0.9f, 1f).isRound)
+        assertTrue(!quality(0.9f, 9f).isRound)
+    }
 }

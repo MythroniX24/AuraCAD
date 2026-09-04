@@ -2505,6 +2505,94 @@ bool Renderer::analyzeRing(int meshIdx) {
     float outerR = sortedR[(size_t)(N * 0.97f)];
     if (outerR - innerR < 1e-7f) return false;
 
+    // ── Pass 5: least-squares CIRCLE FIT of the inner bore ────────────────────
+    // The percentile radius above is robust but only a single scalar and is
+    // biased by inner chamfers/engraving; it also can't detect an oval bore.
+    // Here we collect the bore-surface vertices (those near innerR), project
+    // them onto the ring plane, and fit a circle (Kåsa algebraic fit). This
+    // yields a truer mean radius, a re-centered bore center, and — crucially —
+    // roundness/ovality/confidence metrics so the UI can report measurement
+    // trust. Deformation still uses this fitted radius as the authoritative
+    // inner diameter.
+    {
+        // Build an orthonormal basis (u,v) spanning the ring plane (⊥ axis).
+        Vec3 up = (fabsf(axisRefined.y) < 0.9f) ? Vec3{0,1,0} : Vec3{1,0,0};
+        Vec3 u  = axisRefined.cross(up);
+        float ul = sqrtf(u.x*u.x+u.y*u.y+u.z*u.z);
+        if (ul > 1e-9f) { u.x/=ul; u.y/=ul; u.z/=ul; }
+        Vec3 vv = axisRefined.cross(u);  // already unit (axis⊥u, both unit)
+
+        // Bore band: vertices whose radius sits in a tight shell around innerR.
+        // Widen slightly (up to 25% of the wall) so we get enough points but
+        // never reach into the outer surface.
+        float band   = std::min(0.25f * (outerR - innerR), 0.35f * innerR);
+        float loCut  = innerR - band * 0.5f;
+        float hiCut  = innerR + band;
+        double su=0, sv=0; int nb=0;
+        std::vector<float> bu, bv;
+        bu.reserve(N); bv.reserve(N);
+        for (size_t i = 0; i < N; ++i) {
+            if (radii[i] < loCut || radii[i] > hiCut) continue;
+            const auto& vtx = mo.vertices[i];
+            float dx = vtx.px-cen.x, dy = vtx.py-cen.y, dz = vtx.pz-cen.z;
+            float pu = dx*u.x + dy*u.y + dz*u.z;   // in-plane coords
+            float pv = dx*vv.x + dy*vv.y + dz*vv.z;
+            bu.push_back(pu); bv.push_back(pv);
+            su += pu; sv += pv; ++nb;
+        }
+
+        float fitR = innerR;             // fallback: percentile radius
+        float cu = 0, cv = 0;            // fitted center offset in-plane
+        float rmsResid = 0, minR = innerR, maxR = innerR;
+        if (nb >= 32) {
+            double mu = su/nb, mv = sv/nb;
+            // Kåsa fit in mean-centered coords: solve for (a,b) center & radius.
+            double Suu=0,Suv=0,Svv=0,Suz=0,Svz=0;
+            for (int i=0;i<nb;++i){
+                double du=bu[i]-mu, dv=bv[i]-mv;
+                double z=du*du+dv*dv;
+                Suu+=du*du; Suv+=du*dv; Svv+=dv*dv; Suz+=du*z; Svz+=dv*z;
+            }
+            double det = Suu*Svv - Suv*Suv;
+            if (fabs(det) > 1e-18) {
+                double a = 0.5*( Svv*Suz - Suv*Svz)/det;
+                double b = 0.5*(-Suv*Suz + Suu*Svz)/det;
+                double rr = sqrt(a*a + b*b + (Suu+Svv)/nb);
+                cu = (float)(mu + a); cv = (float)(mv + b);
+                fitR = (float)rr;
+                // Residual + min/max radius from the fitted center.
+                double acc = 0; minR = FLT_MAX; maxR = -FLT_MAX;
+                for (int i=0;i<nb;++i){
+                    float du=bu[i]-cu, dv=bv[i]-cv;
+                    float ri=sqrtf(du*du+dv*dv);
+                    minR=std::min(minR,ri); maxR=std::max(maxR,ri);
+                    float e=ri-fitR; acc+=(double)e*e;
+                }
+                rmsResid = (float)sqrt(acc/nb);
+            }
+        }
+
+        // Adopt the fitted bore: shift the stored center onto the true bore
+        // center (in-plane) so deformation is symmetric about the real hole.
+        if (fitR > 1e-7f && nb >= 32) {
+            cen.x += cu*u.x + cv*vv.x;
+            cen.y += cu*u.y + cv*vv.y;
+            cen.z += cu*u.z + cv*vv.z;
+            innerR = fitR;
+        }
+        m_ring.boreMinR       = (minR < FLT_MAX) ? minR : innerR;
+        m_ring.boreMaxR       = (maxR > -FLT_MAX) ? maxR : innerR;
+        m_ring.boreRoundnessN = rmsResid;
+        m_ring.boreOvalityPct = (innerR > 1e-7f)
+            ? (m_ring.boreMaxR - m_ring.boreMinR) / innerR * 100.f : 0.f;
+        m_ring.borePointCount = nb;
+        // Confidence: many points + low relative residual → high trust.
+        float relResid = (innerR > 1e-7f) ? rmsResid / innerR : 1.f;
+        float ptScore  = std::min(1.f, nb / 256.f);
+        float fitScore = std::max(0.f, 1.f - relResid * 12.f);
+        m_ring.boreConfidence = std::max(0.f, std::min(1.f, 0.4f*ptScore + 0.6f*fitScore));
+    }
+
     // ── Store ─────────────────────────────────────────────────────────────────
     m_ring.center        = cen;
     m_ring.axis          = axisRefined;
@@ -2543,7 +2631,7 @@ bool Renderer::analyzeRing(int meshIdx) {
 }
 
 // ── Parameters in mm ─────────────────────────────────────────────────────────
-bool Renderer::getRingParams(float out[6]) const {
+bool Renderer::getRingParams(float out[12]) const {
     if (!m_ring.valid) return false;
     float toMM = mmPerUnit();
     float curInnerMM = m_ring.currentInnerR * toMM;
@@ -2555,6 +2643,14 @@ bool Renderer::getRingParams(float out[6]) const {
     out[3] = curInnerMM * 2.f;  // inner diameter (mm)
     out[4] = curOuterMM * 2.f;  // outer diameter (mm)
     out[5] = m_ring.currentHeight * toMM;  // ring height (mm)
+    // ── Measurement-quality metrics (from the analyzeRing circle fit) ────────
+    // These describe the ORIGINAL detected bore, not the live deformation.
+    out[6]  = m_ring.boreRoundnessN * toMM;   // RMS fit residual (mm)
+    out[7]  = m_ring.boreMinR * 2.f * toMM;   // min bore diameter (mm)
+    out[8]  = m_ring.boreMaxR * 2.f * toMM;   // max bore diameter (mm)
+    out[9]  = m_ring.boreOvalityPct;          // ovality (%)
+    out[10] = m_ring.boreConfidence;          // confidence (0..1)
+    out[11] = (float)m_ring.borePointCount;   // vertices used in the fit
     return true;
 }
 

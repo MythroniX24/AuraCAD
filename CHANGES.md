@@ -1,3 +1,36 @@
+# Ring Tool — accurate measurement (bore circle fit + quality) (2026-09-04)
+
+Upgraded ring **measurement** accuracy and added a trust signal. Full write-up in
+`docs/ring-tool-architecture.md`.
+
+1. **Least-squares bore circle fit (native).** `analyzeRing` previously estimated
+   the inner radius from a single percentile of radial distances — robust but
+   unable to detect an oval/off-center bore and biased by inner chamfers. A new
+   pass projects the bore-shell vertices to the ring plane and fits a circle
+   (Kåsa algebraic least-squares). It yields a truer mean radius, re-centers the
+   bore center so deformation is symmetric about the real hole, and produces
+   **roundness (RMS residual), min/max bore diameter, ovality %, and a
+   confidence score**. Guarded with a fallback to the percentile radius, so
+   detection never regresses. Resize stays exact.
+2. **Wider params contract.** `getRingParams` now returns 12 floats (old 0–5
+   unchanged; 6–11 add the quality metrics). New pure `RingSizeEngine.Quality`
+   wraps them with an EXCELLENT/GOOD/FAIR/POOR tier + `isRound`.
+3. **Quality shown in the UI.** The detection summary now shows inner
+   circumference and a colour-coded measurement-quality line, and warns with the
+   min/max bore diameter when the bore is out of round.
+4. **US presets derive from `RingMath`** (removed the stale hard-coded diameter
+   table so presets always match the corrected formula and the AI target).
+5. **Tests:** `RingSizeEngineTest` now covers the quality tiers + `isRound`.
+
+Files: `app/src/main/cpp/renderer.cpp`, `app/src/main/cpp/renderer.h`,
+`app/src/main/cpp/jni_bridge.cpp`,
+`app/src/main/java/com/modelviewer3d/RingSizeEngine.kt`,
+`app/src/main/java/com/modelviewer3d/RingToolFragment.kt`,
+`app/src/test/java/com/modelviewer3d/RingSizeEngineTest.kt`,
+`docs/ring-tool-architecture.md` (new).
+
+---
+
 # AI Ring Size Changer — accurate + optimized (deterministic-first) (2026-09-04)
 
 Redesigned the AI ring-size changer so sizing is **exact and instant**, and the

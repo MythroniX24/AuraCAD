@@ -58,6 +58,9 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private var ringAnalyzed  = false
     private var proportional = false
 
+    // Latest measurement quality from the native bore circle fit (null = legacy).
+    private var lastQuality: RingSizeEngine.Quality? = null
+
     // Suppress callbacks while programmatically seeding sliders
     @Volatile private var suppressBW = false
     @Volatile private var suppressID = false
@@ -96,10 +99,11 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private var lastID = -1f
     private var lastH  = -1f
 
-    private val usPresets = listOf(
-        3f to 14.1f, 4f to 14.9f, 5f to 15.7f, 6f to 16.5f, 7f to 17.3f,
-        8f to 18.1f, 9f to 18.9f, 10f to 19.8f, 11f to 20.6f, 12f to 21.4f
-    )
+    // US quick-size presets. Diameters are derived from the single-source-of-
+    // truth RingMath formula (not a stale hard-coded table) so they always match
+    // the AI target and the size labels.
+    private val usPresets: List<Pair<Float, Float>> =
+        (3..12).map { us -> us.toFloat() to RingMath.usSizeToDiam(us.toFloat()) }
 
     private fun watcher(action: () -> Unit) = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -585,13 +589,26 @@ class RingToolFragment : BottomSheetDialogFragment() {
         }
     }
 
-    /** p = [innerRad, outerRad, bandWidth, innerDia, outerDia, height] */
+    /**
+     * p = [0]innerRad [1]outerRad [2]bandWidth [3]innerDia [4]outerDia [5]height
+     *     [6]roundnessMM [7]minBoreDia [8]maxBoreDia [9]ovality% [10]confidence
+     *     [11]borePointCount   (indices 6+ present only from the v4 native core)
+     */
     private fun applyParams(p: FloatArray) {
         origInnerRadMM0 = p[0]
         origOuterDiaMM  = p[4]
         origInnerDiaMM  = p[3]
         origBandWidthMM = p[2]
         origHeightMM    = p[5]
+
+        lastQuality = if (p.size >= 12) RingSizeEngine.Quality(
+            roundnessMM  = p[6],
+            minBoreDiaMM = p[7],
+            maxBoreDiaMM = p[8],
+            ovalityPct   = p[9],
+            confidence   = p[10],
+            pointCount   = p[11].toInt(),
+        ) else null
 
         bwMin = (origBandWidthMM * 0.1f).coerceAtLeast(0.05f)
         bwMax = (origBandWidthMM * 3.5f).coerceAtMost(50f)
@@ -613,9 +630,30 @@ class RingToolFragment : BottomSheetDialogFragment() {
         tvStatus?.text = "✓ Ring detected"
         tvStatus?.setTextColor(Color.parseColor("#4CAF82"))
 
-        tvSummary?.text = "📋 Inner ⌀ %.2f mm · Outer ⌀ %.2f mm · Band %.2f mm · Height %.2f mm · %s".format(
+        val summary = StringBuilder()
+        summary.append("📋 Inner ⌀ %.2f mm · Outer ⌀ %.2f mm · Band %.2f mm · Height %.2f mm · %s".format(
             origInnerDiaMM, origOuterDiaMM, origBandWidthMM, origHeightMM,
-            RingMath.usSizeLabel(origInnerDiaMM))
+            RingMath.usSizeLabel(origInnerDiaMM)))
+        summary.append("\nCircumference %.1f mm".format(RingMath.circumferenceMM(origInnerDiaMM)))
+        lastQuality?.let { q ->
+            val icon = when (q.tier) {
+                RingSizeEngine.Quality.Tier.EXCELLENT -> "🟢"
+                RingSizeEngine.Quality.Tier.GOOD -> "🟢"
+                RingSizeEngine.Quality.Tier.FAIR -> "🟡"
+                RingSizeEngine.Quality.Tier.POOR -> "🔴"
+            }
+            summary.append("\n$icon ${q.summary()}")
+            if (!q.isRound) {
+                summary.append("\n⚠️ Bore is out of round (⌀ %.2f–%.2f mm) — size is approximate."
+                    .format(q.minBoreDiaMM, q.maxBoreDiaMM))
+            }
+        }
+        tvSummary?.text = summary.toString()
+        tvSummary?.setTextColor(Color.parseColor(when (lastQuality?.tier) {
+            RingSizeEngine.Quality.Tier.POOR -> "#FF7A72"
+            RingSizeEngine.Quality.Tier.FAIR -> "#FFD54F"
+            else -> "#4DD8FF"
+        }))
         tvSummary?.visibility = View.VISIBLE
 
         cardBW?.visibility = View.VISIBLE

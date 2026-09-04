@@ -89,6 +89,16 @@ struct RingState {
     float currentOuterR = 0.0f;
     float currentHeight = 0.0f;  // current axial extent (normalized units)
 
+    // ── Measurement quality (set at analyzeRing) ─────────────────────────────
+    // Derived from a least-squares circle fit of the inner bore cross-section.
+    // All radii in normalized units; convert with mmPerUnit() when reporting.
+    float boreRoundnessN = 0.0f; // RMS residual of the circle fit (normalized)
+    float boreMinR       = 0.0f; // smallest bore radius from the fitted center
+    float boreMaxR       = 0.0f; // largest  bore radius from the fitted center
+    float boreOvalityPct = 0.0f; // (maxR - minR) / fittedR * 100
+    float boreConfidence = 0.0f; // 0..1 measurement confidence
+    int   borePointCount = 0;    // vertices used in the fit
+
     bool  valid     = false;
     int   meshIdx   = -1;
 
@@ -197,7 +207,10 @@ public:
 
     // Ring deformation tools (all GL-thread)
     bool  analyzeRing(int meshIdx);
-    bool  getRingParams(float out[6]) const;   // [innerRadMM, outerRadMM, bwMM, innerDiaMM, outerDiaMM, heightMM]
+    // [0]=innerRadMM [1]=outerRadMM [2]=bwMM [3]=innerDiaMM [4]=outerDiaMM
+    // [5]=heightMM [6]=roundnessMM(RMS) [7]=minBoreDiaMM [8]=maxBoreDiaMM
+    // [9]=ovalityPct [10]=confidence(0..1) [11]=borePointCount
+    bool  getRingParams(float out[12]) const;
     void  setRingBandWidth(float newWidthMM);
     void  setRingInnerDiameter(float newDiamMM);
     void  setRingHeight(float newHeightMM);
