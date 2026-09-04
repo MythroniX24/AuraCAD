@@ -1,3 +1,27 @@
+# Ring Tool — AI Ring Fit UI fixes (2026-09-04)
+
+Fixed a UI glitch on the Ring Tool screen in the AI ring-size selector, plus
+related polish:
+
+1. **AI target-size chips overflowed off-screen (the glitch).** The "AI RING
+   FIT" card built 21 US-size chips (US 3 → 13, step 0.5 ≈ 1218 dp) in a plain
+   horizontal `LinearLayout` that lived inside a *vertical* `ScrollView`, so on a
+   normal phone width every size past ~US 6 was clipped/unreachable and the
+   selection looked broken. The chip row is now wrapped in a
+   `HorizontalScrollView` so all sizes scroll into reach.
+2. **"QUICK US SIZES" preset row had the same overflow** — also wrapped in a
+   `HorizontalScrollView`; its section header + row now show/hide together.
+3. **Selected chip was barely visible** — highlight used alpha only. It now
+   swaps to a violet-accented selected background (`bg_chip_selected_violet`)
+   with white text, and the default target (US 7) is highlighted on open.
+4. **Chips stayed tappable during an AI run** — target chips + the analyze
+   button are now disabled while Gemini is working and re-enabled in `finally`.
+
+Files: `app/src/main/java/com/modelviewer3d/RingToolFragment.kt`,
+`app/src/main/res/drawable/bg_chip_selected_violet.xml` (new).
+
+---
+
 # 3DS / 3DM import fixes (2026-09-04)
 
 Two loader bugs made many `.3ds` and `.3dm` files import broken (missing

@@ -12,6 +12,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -78,6 +79,10 @@ class RingToolFragment : BottomSheetDialogFragment() {
     // Field type is View on purpose — assigning LinearLayout children
     // (measureCard result) must stay View-typed to avoid smart-cast errors.
     private var presetScroll: LinearLayout? = null
+    // The HorizontalScrollView wrapping presetScroll + its section header —
+    // toggled together so the "QUICK US SIZES" row shows/hides as one unit.
+    private var presetScrollContainer: View? = null
+    private var presetSectionLabel: View? = null
 
     // Gemini AI Ring Fit
     private var aiCard: View? = null
@@ -240,14 +245,26 @@ class RingToolFragment : BottomSheetDialogFragment() {
         hCard.visibility = View.GONE; root.addView(hCard); cardH = hCard
 
         // ── 6. US size presets ─────────────────────────────────────────────────
-        root.addView(UISheetKit.sectionLabel(ctx, "QUICK US SIZES"))
+        val presetHeader = UISheetKit.sectionLabel(ctx, "QUICK US SIZES")
+        presetHeader.visibility = View.GONE
+        root.addView(presetHeader)
+        presetSectionLabel = presetHeader
         val presetRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(UISheetKit.dp(ctx, 16), 0, UISheetKit.dp(ctx, 16), 0)
+            gravity = Gravity.CENTER_VERTICAL
         }
         presetScroll = presetRow
-        presetRow.visibility = View.GONE
-        root.addView(presetRow)
+        // Preset chips can exceed the screen width too — wrap in a horizontal
+        // scroller so every quick size stays reachable.
+        val presetScrollView = HorizontalScrollView(ctx).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setPadding(UISheetKit.dp(ctx, 16), 0, UISheetKit.dp(ctx, 16), 0)
+            visibility = View.GONE
+            addView(presetRow)
+        }
+        presetScrollContainer = presetScrollView
+        root.addView(presetScrollView)
 
         // ── 7. Action row ──────────────────────────────────────────────────────
         root.addView(LinearLayout(ctx).apply {
@@ -295,7 +312,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             addView(UISheetKit.sectionLabel(ctx, "TARGET US SIZE"))
             val chipRow = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(0, UISheetKit.dp(ctx, 4), 0, 0)
+                setPadding(0, UISheetKit.dp(ctx, 4), 0, UISheetKit.dp(ctx, 2))
                 gravity = Gravity.START
             }
             // Build half-size chips: 3, 3.5, 4, 4.5, ... 13
@@ -314,7 +331,16 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 chipRow.addView(chip)
             }
             aiUsChipRow = chipRow
-            addView(chipRow)
+            // 21 chips (~1218dp) can't fit a phone width, so make the row
+            // horizontally scrollable — otherwise sizes past ~US 6 overflow off
+            // screen and look clipped/broken.
+            addView(HorizontalScrollView(ctx).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(chipRow)
+            })
+            // Reflect the default target (US 7) so a selection is always visible.
+            highlightAiChipAt(usSizes.indexOfFirst { it == selectedUsSize })
 
             addView(UISheetKit.primaryButton(ctx, "✨  Analyze & Fit with Gemini", 48).apply {
                 setOnClickListener { runAiRingFit() }
@@ -532,7 +558,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
         cardBW?.visibility = View.GONE
         cardID?.visibility = View.GONE
         cardH?.visibility = View.GONE
-        presetScroll?.visibility = View.GONE
+        presetScrollContainer?.visibility = View.GONE
+        presetSectionLabel?.visibility = View.GONE
         tvSummary?.visibility = View.GONE
         tvStatus?.text = "Analyzing ring geometry…"
         tvStatus?.setTextColor(Color.parseColor("#FFD54F"))
@@ -594,7 +621,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
         cardID?.visibility = View.VISIBLE
         cardH?.visibility = View.VISIBLE
         buildPresets()
-        presetScroll?.visibility = View.VISIBLE
+        presetScrollContainer?.visibility = View.VISIBLE
+        presetSectionLabel?.visibility = View.VISIBLE
         aiCard?.visibility = View.VISIBLE
         updateInfo(); updatePreview()
     }
@@ -665,6 +693,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
         }
 
         aiButton?.isEnabled = false
+        aiUsChipRow?.isEnabled = false
+        aiUsChipRow?.let { for (i in 0 until it.childCount) it.getChildAt(i).isEnabled = false }
         setAiStatus("🎯 Target: $targetLabel (%.2f mm) — capturing calibrated views…".format(targetMM), "#FFD54F")
         lifecycleScope.launch {
             try {
@@ -803,6 +833,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 setAiStatus("AI fit failed: ${e.message ?: "try again"}", "#FF7A72")
             } finally {
                 aiButton?.isEnabled = true
+                aiUsChipRow?.isEnabled = true
+                aiUsChipRow?.let { for (i in 0 until it.childCount) it.getChildAt(i).isEnabled = true }
             }
         }
     }
@@ -1118,9 +1150,20 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
     /** Highlights the chip at [idx] and dims all others. */
     private fun highlightAiChipAt(idx: Int) {
+        val ctx = context ?: return
         aiUsChipRow?.let { row ->
             for (i in 0 until row.childCount) {
-                row.getChildAt(i).alpha = if (i == idx) 1f else 0.5f
+                val chip = row.getChildAt(i)
+                val selected = i == idx
+                // Clear selected state gives a filled accent look; unselected
+                // stays the plain dark card. Alpha alone was too subtle to read.
+                chip.background = ctx.getDrawable(
+                    if (selected) R.drawable.bg_chip_selected_violet else R.drawable.bg_card_dark
+                )
+                chip.alpha = if (selected) 1f else 0.7f
+                (chip as? Button)?.setTextColor(
+                    Color.parseColor(if (selected) "#FFFFFF" else "#A78BFA")
+                )
             }
         }
     }
