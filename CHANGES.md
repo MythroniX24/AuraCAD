@@ -1,3 +1,37 @@
+# AI Ring Size Changer — accurate + optimized (deterministic-first) (2026-09-04)
+
+Redesigned the AI ring-size changer so sizing is **exact and instant**, and the
+AI is demoted to an optional structural check. Full write-up in
+`docs/ring-size-changer-architecture.md`.
+
+1. **Fixed the root-cause accuracy bug: wrong US↔mm formula.** `RingMath` used
+   `inner_mm = US × 0.4064 + 12.7`, a slope ~2× too shallow — "US 7" targeted
+   15.5 mm instead of 17.3 mm (off by up to 3.8 mm at US 12), and correctly-sized
+   rings were mislabelled by several sizes. Now `US × 0.8128 + 11.632`, the
+   least-squares fit of AuraCAD's own preset table (< 0.05 mm error). US sizes
+   still clamp to `[1, 20]` so they are never negative.
+2. **Sizing no longer goes through AI vision.** The native renderer already
+   measures the ring exactly (`analyzeRing`) and resizes exactly from `origVerts`
+   (`applyCombinedRingDeformation`). The new flow: **measure → compute exact plan
+   → apply → re-measure & verify (mm) → optional structural AI check.** Gemini
+   round-trips per resize drop from **up to 5 → 0 (offline) or 1**; the resize is
+   instant and works with no API key.
+3. **New pure, JVM-testable core `RingSizeEngine`** computes the exact target
+   diameter, preserves & clamps band/height, and verifies the achieved geometry.
+   The optional Gemini call (`inspectStructure`) only judges structural integrity
+   and can never alter dimensions.
+4. **Tests:** `RingMathTest` locks the conversion to the preset table;
+   `RingSizeEngineTest` covers plan/preserve/clamp/verify.
+
+Files: `app/src/main/java/com/modelviewer3d/RingMath.kt`,
+`app/src/main/java/com/modelviewer3d/RingSizeEngine.kt` (new),
+`app/src/main/java/com/modelviewer3d/RingToolFragment.kt`,
+`app/src/test/java/com/modelviewer3d/RingMathTest.kt` (new),
+`app/src/test/java/com/modelviewer3d/RingSizeEngineTest.kt` (new),
+`docs/ring-size-changer-architecture.md` (new).
+
+---
+
 # Ring Tool — AI Ring Fit UI fixes (2026-09-04)
 
 Fixed a UI glitch on the Ring Tool screen in the AI ring-size selector, plus
