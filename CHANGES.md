@@ -1,3 +1,30 @@
+# Resize/Export quality fixes (2026-09-04)
+
+Resizing a model or mesh never touches vertex data — it only sets scale
+factors on a transform matrix, so no polygons are lost at resize time. The
+perceived "quality/poly-count loss after resizing + exporting" came from two
+separate bugs, now fixed:
+
+1. **Non-uniform scale skewed surface normals → model looked faceted/ugly.**
+   `Mat4::toNormalMatrix()` used the raw upper-left 3×3 of the model matrix
+   (its comment even said *"assumes uniform scale"*). Under non-uniform W/H/D
+   resize this tilts every normal, breaking lighting both in the live viewport
+   **and** in exported normals. It now computes the correct **inverse-transpose**
+   3×3 normal matrix. Exporters (OBJ/PLY/GLB) now transform normals through
+   that matrix via the new `applyNormalMat3()` helper instead of the raw 3×3.
+   Files: `app/src/main/cpp/math_utils.h`, `app/src/main/cpp/renderer.cpp`.
+
+2. **3DS export silently dropped meshes > 65 535 vertices → fewer polys, smaller
+   file.** `export3DS()` had `if (mo.vertices.size() > 65535) continue;` because
+   the 3DS format uses 16-bit vertex indices — so any detailed mesh vanished
+   entirely from the exported file. It now **splits** large meshes into multiple
+   3DS sub-objects (each re-indexed within the u16 limit) so the full geometry
+   survives the export. File: `app/src/main/cpp/renderer.cpp` (`export3DS`).
+
+No public Kotlin/JNI API changed.
+
+---
+
 # Phase 1 — Stability, Performance & Build Pipeline
 
 This document lists every change made for the Phase 1 hardening pass. Nothing

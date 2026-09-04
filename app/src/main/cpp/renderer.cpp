@@ -1145,12 +1145,30 @@ static Vec3 applyMat4Point(const Mat4& mat, float x, float y, float z) {
         mat.m[2]*x + mat.m[6]*y + mat.m[10]*z + mat.m[14]
     };
 }
-// Transform a normal using the upper-left 3x3 of the matrix, then renormalize
+// Transform a normal using the upper-left 3x3 of the matrix, then renormalize.
+// NOTE: this is only correct for uniform scale / rotation.  For export under
+// non-uniform resize, use applyNormalMat3() with a precomputed inverse-transpose
+// normal matrix (Mat4::toNormalMatrix) so surface normals stay perpendicular.
 static Vec3 applyMat4Normal(const Mat4& mat, float nx, float ny, float nz) {
     Vec3 n{
         mat.m[0]*nx + mat.m[4]*ny + mat.m[8]*nz,
         mat.m[1]*nx + mat.m[5]*ny + mat.m[9]*nz,
         mat.m[2]*nx + mat.m[6]*ny + mat.m[10]*nz
+    };
+    float len = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
+    if(len > 1e-9f){ n.x /= len; n.y /= len; n.z /= len; }
+    return n;
+}
+
+// Transform a normal by a column-major 3x3 normal matrix (nm[col*3+row]),
+// then renormalize.  nm is produced by Mat4::toNormalMatrix (inverse-transpose),
+// so this stays correct for non-uniform scale — the reason resized exports no
+// longer look faceted / wrongly lit.
+static inline Vec3 applyNormalMat3(const float nm[9], float nx, float ny, float nz) {
+    Vec3 n{
+        nm[0]*nx + nm[3]*ny + nm[6]*nz,
+        nm[1]*nx + nm[4]*ny + nm[7]*nz,
+        nm[2]*nx + nm[5]*ny + nm[8]*nz
     };
     float len = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
     if(len > 1e-9f){ n.x /= len; n.y /= len; n.z /= len; }
@@ -1177,13 +1195,14 @@ bool Renderer::exportOBJ(const std::string& path) const {
         float toMM = mmPerUnit();
         Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
         Mat4 model  = global * buildMeshMatrix(mo) * mmConv;
+        float nm[9]; model.toNormalMatrix(nm);   // inverse-transpose: correct under non-uniform scale
 
         for(const auto& v : mo.vertices){
             Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
             f << "v " << p.x << " " << p.y << " " << p.z << "\n";
         }
         for(const auto& v : mo.vertices){
-            Vec3 n = applyMat4Normal(model, v.nx, v.ny, v.nz);
+            Vec3 n = applyNormalMat3(nm, v.nx, v.ny, v.nz);
             f << "vn " << n.x << " " << n.y << " " << n.z << "\n";
         }
         for(size_t i = 0; i+2 < mo.indices.size(); i+=3){
@@ -1270,9 +1289,10 @@ bool Renderer::exportPLY(const std::string& path) const {
     for(const auto& mo : m_meshes){
         if(!mo.visible) continue;
         Mat4 model = global * buildMeshMatrix(mo) * mmConv;
+        float nm[9]; model.toNormalMatrix(nm);   // inverse-transpose: correct under non-uniform scale
         for(const auto& v : mo.vertices){
             Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
-            Vec3 n = applyMat4Normal(model, v.nx, v.ny, v.nz);
+            Vec3 n = applyNormalMat3(nm, v.nx, v.ny, v.nz);
             f << p.x << " " << p.y << " " << p.z << " "
               << n.x << " " << n.y << " " << n.z << "\n";
         }
@@ -1352,6 +1372,7 @@ bool Renderer::exportGLB(const std::string& path) const {
         if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
         bool u16 = mo.vertices.size() <= 65535;
         Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
+        float nm[9]; mtx.toNormalMatrix(nm);   // inverse-transpose: correct under non-uniform scale
 
         uint64_t posOff = bin.size();
         for (const auto& v : mo.vertices) {
@@ -1362,7 +1383,7 @@ bool Renderer::exportGLB(const std::string& path) const {
         }
         uint64_t norOff = bin.size();
         for (const auto& v : mo.vertices) {
-            Vec3 n = applyMat4Normal(mtx, v.nx, v.ny, v.nz);
+            Vec3 n = applyNormalMat3(nm, v.nx, v.ny, v.nz);
             float f[3] = {n.x, n.y, n.z};
             bin.insert(bin.end(), reinterpret_cast<const uint8_t*>(f),
                        reinterpret_cast<const uint8_t*>(f) + 12);
@@ -1481,13 +1502,14 @@ bool Renderer::export3DS(const std::string& path) const {
 
     std::vector<uint8_t> editor;   // 0x3D3D content
     int meshIndex = 0;
-    for (const auto& mo : m_meshes) {
-        if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
-        if (mo.vertices.size() > 65535) continue;   // 3DS uses u16 indices
-        Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
 
+    // Emit one 0x4000 object (name + 0x4100 tri-mesh) from a set of triangles
+    // that reference at most 65535 unique vertices. positions are already in
+    // world/mm space. localIdx maps triangle corners to compacted vertex ids.
+    auto emitObject = [&](const std::string& name,
+                          const std::vector<Vec3>& verts,
+                          const std::vector<uint16_t>& idx) {
         std::vector<uint8_t> objData;   // 0x4000 content: name + 0x4100
-        std::string name = mo.name.empty() ? "Mesh" + std::to_string(meshIndex) : mo.name;
         for (char ch : name) objData.push_back((uint8_t)ch);
         objData.push_back(0);
         if (objData.size() & 1) objData.push_back(0);   // pad name to even length
@@ -1495,11 +1517,10 @@ bool Renderer::export3DS(const std::string& path) const {
         std::vector<uint8_t> triData;   // 0x4100 content: 0x4110 + 0x4120
         {
             std::vector<uint8_t> vd;    // 0x4110: u16 count + vertices
-            uint16_t vc = (uint16_t)mo.vertices.size();
+            uint16_t vc = (uint16_t)verts.size();
             vd.insert(vd.end(), reinterpret_cast<const uint8_t*>(&vc),
                       reinterpret_cast<const uint8_t*>(&vc) + 2);
-            for (const auto& v : mo.vertices) {
-                Vec3 p = applyMat4Point(mtx, v.px, v.py, v.pz);
+            for (const auto& p : verts) {
                 float f3[3] = {p.x, p.y, p.z};
                 vd.insert(vd.end(), reinterpret_cast<const uint8_t*>(f3),
                           reinterpret_cast<const uint8_t*>(f3) + 12);
@@ -1508,12 +1529,11 @@ bool Renderer::export3DS(const std::string& path) const {
         }
         {
             std::vector<uint8_t> fd;    // 0x4120: u16 count + (3×u16 idx + u16 flags)
-            uint16_t fc = (uint16_t)(mo.indices.size() / 3);
+            uint16_t fc = (uint16_t)(idx.size() / 3);
             fd.insert(fd.end(), reinterpret_cast<const uint8_t*>(&fc),
                       reinterpret_cast<const uint8_t*>(&fc) + 2);
-            for (size_t i = 0; i < mo.indices.size(); i += 3) {
-                uint16_t t[4] = {(uint16_t)mo.indices[i+0], (uint16_t)mo.indices[i+1],
-                                 (uint16_t)mo.indices[i+2], 0};
+            for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+                uint16_t t[4] = {idx[i+0], idx[i+1], idx[i+2], 0};
                 fd.insert(fd.end(), reinterpret_cast<const uint8_t*>(t),
                           reinterpret_cast<const uint8_t*>(t) + 8);
             }
@@ -1521,6 +1541,61 @@ bool Renderer::export3DS(const std::string& path) const {
         }
         appendChunk(objData, 0x4100, triData);
         appendChunk(editor, 0x4000, objData);
+    };
+
+    for (const auto& mo : m_meshes) {
+        if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
+        Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
+        std::string baseName = mo.name.empty() ? "Mesh" + std::to_string(meshIndex) : mo.name;
+
+        // 3DS uses u16 vertex indices (max 65535 verts per object). Rather than
+        // DROP meshes above that limit (which silently reduced poly count and
+        // file size after loading detailed models), split them into as many
+        // sub-objects as needed, re-indexing each chunk locally. No geometry is
+        // ever lost — the whole mesh survives the round-trip.
+        constexpr uint32_t kMaxVerts = 65535;
+        std::vector<int32_t> remap(mo.vertices.size(), -1);
+        std::vector<Vec3>    chunkVerts;
+        std::vector<uint16_t> chunkIdx;
+        int part = 0;
+
+        auto flushChunk = [&]() {
+            if (chunkIdx.empty()) return;
+            std::string nm = (part == 0) ? baseName
+                                         : baseName + "_" + std::to_string(part);
+            emitObject(nm, chunkVerts, chunkIdx);
+            ++part;
+            // reset for the next chunk
+            std::fill(remap.begin(), remap.end(), -1);
+            chunkVerts.clear();
+            chunkIdx.clear();
+        };
+
+        for (size_t i = 0; i + 2 < mo.indices.size(); i += 3) {
+            unsigned int tri[3] = { mo.indices[i+0], mo.indices[i+1], mo.indices[i+2] };
+            // How many NEW vertices would this triangle add to the current chunk?
+            uint32_t newVerts = 0;
+            for (int k = 0; k < 3; ++k)
+                if (tri[k] < remap.size() && remap[tri[k]] < 0) ++newVerts;
+            if (chunkVerts.size() + newVerts > kMaxVerts) flushChunk();
+
+            uint16_t local[3];
+            for (int k = 0; k < 3; ++k) {
+                unsigned int gi = tri[k];
+                if (gi >= mo.vertices.size()) { local[k] = 0; continue; }
+                if (remap[gi] < 0) {
+                    const auto& v = mo.vertices[gi];
+                    Vec3 p = applyMat4Point(mtx, v.px, v.py, v.pz);
+                    remap[gi] = (int32_t)chunkVerts.size();
+                    chunkVerts.push_back(p);
+                }
+                local[k] = (uint16_t)remap[gi];
+            }
+            chunkIdx.push_back(local[0]);
+            chunkIdx.push_back(local[1]);
+            chunkIdx.push_back(local[2]);
+        }
+        flushChunk();
         ++meshIndex;
     }
     if (editor.empty()) return false;
