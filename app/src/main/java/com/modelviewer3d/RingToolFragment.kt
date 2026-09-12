@@ -12,6 +12,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
 import android.widget.EditText
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.SeekBar
@@ -57,6 +58,9 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private var ringAnalyzed  = false
     private var proportional = false
 
+    // Latest measurement quality from the native bore circle fit (null = legacy).
+    private var lastQuality: RingSizeEngine.Quality? = null
+
     // Suppress callbacks while programmatically seeding sliders
     @Volatile private var suppressBW = false
     @Volatile private var suppressID = false
@@ -78,6 +82,10 @@ class RingToolFragment : BottomSheetDialogFragment() {
     // Field type is View on purpose — assigning LinearLayout children
     // (measureCard result) must stay View-typed to avoid smart-cast errors.
     private var presetScroll: LinearLayout? = null
+    // The HorizontalScrollView wrapping presetScroll + its section header —
+    // toggled together so the "QUICK US SIZES" row shows/hides as one unit.
+    private var presetScrollContainer: View? = null
+    private var presetSectionLabel: View? = null
 
     // Gemini AI Ring Fit
     private var aiCard: View? = null
@@ -91,10 +99,11 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private var lastID = -1f
     private var lastH  = -1f
 
-    private val usPresets = listOf(
-        3f to 14.1f, 4f to 14.9f, 5f to 15.7f, 6f to 16.5f, 7f to 17.3f,
-        8f to 18.1f, 9f to 18.9f, 10f to 19.8f, 11f to 20.6f, 12f to 21.4f
-    )
+    // US quick-size presets. Diameters are derived from the single-source-of-
+    // truth RingMath formula (not a stale hard-coded table) so they always match
+    // the AI target and the size labels.
+    private val usPresets: List<Pair<Float, Float>> =
+        (3..12).map { us -> us.toFloat() to RingMath.usSizeToDiam(us.toFloat()) }
 
     private fun watcher(action: () -> Unit) = object : TextWatcher {
         override fun beforeTextChanged(s: CharSequence?, a: Int, b: Int, c: Int) {}
@@ -240,14 +249,26 @@ class RingToolFragment : BottomSheetDialogFragment() {
         hCard.visibility = View.GONE; root.addView(hCard); cardH = hCard
 
         // ── 6. US size presets ─────────────────────────────────────────────────
-        root.addView(UISheetKit.sectionLabel(ctx, "QUICK US SIZES"))
+        val presetHeader = UISheetKit.sectionLabel(ctx, "QUICK US SIZES")
+        presetHeader.visibility = View.GONE
+        root.addView(presetHeader)
+        presetSectionLabel = presetHeader
         val presetRow = LinearLayout(ctx).apply {
             orientation = LinearLayout.HORIZONTAL
-            setPadding(UISheetKit.dp(ctx, 16), 0, UISheetKit.dp(ctx, 16), 0)
+            gravity = Gravity.CENTER_VERTICAL
         }
         presetScroll = presetRow
-        presetRow.visibility = View.GONE
-        root.addView(presetRow)
+        // Preset chips can exceed the screen width too — wrap in a horizontal
+        // scroller so every quick size stays reachable.
+        val presetScrollView = HorizontalScrollView(ctx).apply {
+            isHorizontalScrollBarEnabled = false
+            overScrollMode = View.OVER_SCROLL_NEVER
+            setPadding(UISheetKit.dp(ctx, 16), 0, UISheetKit.dp(ctx, 16), 0)
+            visibility = View.GONE
+            addView(presetRow)
+        }
+        presetScrollContainer = presetScrollView
+        root.addView(presetScrollView)
 
         // ── 7. Action row ──────────────────────────────────────────────────────
         root.addView(LinearLayout(ctx).apply {
@@ -281,8 +302,9 @@ class RingToolFragment : BottomSheetDialogFragment() {
         val builtAiCard = UISheetKit.card(ctx, marginTopDp = 12).apply {
             addView(UISheetKit.cardTitle(ctx, "AI RING FIT", "#A78BFA"))
             addView(UISheetKit.subText(ctx,
-                "Select your target US ring size. Gemini visually inspects the ring, " +
-                    "uses ruler + ring tools, and sizes it accurately.",
+                "Pick a target US size — the ring is measured and resized to the exact " +
+                    "millimetre, instantly. Gemini then does an optional structural check " +
+                    "(needs an API key; sizing works offline too).",
                 "#A9B8CC", 10f))
 
             // Hidden EditText kept for API compatibility — actual input is chips
@@ -295,7 +317,7 @@ class RingToolFragment : BottomSheetDialogFragment() {
             addView(UISheetKit.sectionLabel(ctx, "TARGET US SIZE"))
             val chipRow = LinearLayout(ctx).apply {
                 orientation = LinearLayout.HORIZONTAL
-                setPadding(0, UISheetKit.dp(ctx, 4), 0, 0)
+                setPadding(0, UISheetKit.dp(ctx, 4), 0, UISheetKit.dp(ctx, 2))
                 gravity = Gravity.START
             }
             // Build half-size chips: 3, 3.5, 4, 4.5, ... 13
@@ -314,9 +336,18 @@ class RingToolFragment : BottomSheetDialogFragment() {
                 chipRow.addView(chip)
             }
             aiUsChipRow = chipRow
-            addView(chipRow)
+            // 21 chips (~1218dp) can't fit a phone width, so make the row
+            // horizontally scrollable — otherwise sizes past ~US 6 overflow off
+            // screen and look clipped/broken.
+            addView(HorizontalScrollView(ctx).apply {
+                isHorizontalScrollBarEnabled = false
+                overScrollMode = View.OVER_SCROLL_NEVER
+                addView(chipRow)
+            })
+            // Reflect the default target (US 7) so a selection is always visible.
+            highlightAiChipAt(usSizes.indexOfFirst { it == selectedUsSize })
 
-            addView(UISheetKit.primaryButton(ctx, "✨  Analyze & Fit with Gemini", 48).apply {
+            addView(UISheetKit.primaryButton(ctx, "✨  Resize to Target Size", 48).apply {
                 setOnClickListener { runAiRingFit() }
             }.also { aiButton = it })
             addView(TextView(ctx).apply {
@@ -532,7 +563,8 @@ class RingToolFragment : BottomSheetDialogFragment() {
         cardBW?.visibility = View.GONE
         cardID?.visibility = View.GONE
         cardH?.visibility = View.GONE
-        presetScroll?.visibility = View.GONE
+        presetScrollContainer?.visibility = View.GONE
+        presetSectionLabel?.visibility = View.GONE
         tvSummary?.visibility = View.GONE
         tvStatus?.text = "Analyzing ring geometry…"
         tvStatus?.setTextColor(Color.parseColor("#FFD54F"))
@@ -557,13 +589,26 @@ class RingToolFragment : BottomSheetDialogFragment() {
         }
     }
 
-    /** p = [innerRad, outerRad, bandWidth, innerDia, outerDia, height] */
+    /**
+     * p = [0]innerRad [1]outerRad [2]bandWidth [3]innerDia [4]outerDia [5]height
+     *     [6]roundnessMM [7]minBoreDia [8]maxBoreDia [9]ovality% [10]confidence
+     *     [11]borePointCount   (indices 6+ present only from the v4 native core)
+     */
     private fun applyParams(p: FloatArray) {
         origInnerRadMM0 = p[0]
         origOuterDiaMM  = p[4]
         origInnerDiaMM  = p[3]
         origBandWidthMM = p[2]
         origHeightMM    = p[5]
+
+        lastQuality = if (p.size >= 12) RingSizeEngine.Quality(
+            roundnessMM  = p[6],
+            minBoreDiaMM = p[7],
+            maxBoreDiaMM = p[8],
+            ovalityPct   = p[9],
+            confidence   = p[10],
+            pointCount   = p[11].toInt(),
+        ) else null
 
         bwMin = (origBandWidthMM * 0.1f).coerceAtLeast(0.05f)
         bwMax = (origBandWidthMM * 3.5f).coerceAtMost(50f)
@@ -585,16 +630,38 @@ class RingToolFragment : BottomSheetDialogFragment() {
         tvStatus?.text = "✓ Ring detected"
         tvStatus?.setTextColor(Color.parseColor("#4CAF82"))
 
-        tvSummary?.text = "📋 Inner ⌀ %.2f mm · Outer ⌀ %.2f mm · Band %.2f mm · Height %.2f mm · %s".format(
+        val summary = StringBuilder()
+        summary.append("📋 Inner ⌀ %.2f mm · Outer ⌀ %.2f mm · Band %.2f mm · Height %.2f mm · %s".format(
             origInnerDiaMM, origOuterDiaMM, origBandWidthMM, origHeightMM,
-            RingMath.usSizeLabel(origInnerDiaMM))
+            RingMath.usSizeLabel(origInnerDiaMM)))
+        summary.append("\nCircumference %.1f mm".format(RingMath.circumferenceMM(origInnerDiaMM)))
+        lastQuality?.let { q ->
+            val icon = when (q.tier) {
+                RingSizeEngine.Quality.Tier.EXCELLENT -> "🟢"
+                RingSizeEngine.Quality.Tier.GOOD -> "🟢"
+                RingSizeEngine.Quality.Tier.FAIR -> "🟡"
+                RingSizeEngine.Quality.Tier.POOR -> "🔴"
+            }
+            summary.append("\n$icon ${q.summary()}")
+            if (!q.isRound) {
+                summary.append("\n⚠️ Bore is out of round (⌀ %.2f–%.2f mm) — size is approximate."
+                    .format(q.minBoreDiaMM, q.maxBoreDiaMM))
+            }
+        }
+        tvSummary?.text = summary.toString()
+        tvSummary?.setTextColor(Color.parseColor(when (lastQuality?.tier) {
+            RingSizeEngine.Quality.Tier.POOR -> "#FF7A72"
+            RingSizeEngine.Quality.Tier.FAIR -> "#FFD54F"
+            else -> "#4DD8FF"
+        }))
         tvSummary?.visibility = View.VISIBLE
 
         cardBW?.visibility = View.VISIBLE
         cardID?.visibility = View.VISIBLE
         cardH?.visibility = View.VISIBLE
         buildPresets()
-        presetScroll?.visibility = View.VISIBLE
+        presetScrollContainer?.visibility = View.VISIBLE
+        presetSectionLabel?.visibility = View.VISIBLE
         aiCard?.visibility = View.VISIBLE
         updateInfo(); updatePreview()
     }
@@ -648,172 +715,120 @@ class RingToolFragment : BottomSheetDialogFragment() {
     private fun valueToProgress(v: Float, min: Float, max: Float) =
         ((v - min) / (max - min) * STEPS).toInt().coerceIn(0, STEPS)
 
-    // ── Gemini visual ring fitting ───────────────────────────────────────────
+    // ══════════════════════════════════════════════════════════════════════════
+    //  AI Ring Size Changer — deterministic-first architecture
+    //
+    //  Sizing is pure geometry, so it is computed EXACTLY and applied INSTANTLY
+    //  with no network dependency:
+    //
+    //    1. MEASURE  native analyzeRing()/getRingParams() → ground-truth mm
+    //    2. COMPUTE  RingSizeEngine.planForUsSize()       → exact target mm
+    //    3. APPLY    native applyCombinedRingDeformation  → exact deform
+    //    4. VERIFY   re-read getRingParams, compare mm    → instant, exact
+    //    5. INSPECT  OPTIONAL single Gemini call          → structural advisory
+    //
+    //  Gemini can no longer change dimensions, so it can never make sizing wrong.
+    //  Calls drop from up to 5 → 0 (offline) or 1 (structural check only).
+    // ══════════════════════════════════════════════════════════════════════════
     private fun runAiRingFit() {
         val targetUS = selectedUsSize
-        val targetMM = RingMath.usSizeToDiam(targetUS)
-        val targetLabel = if (targetUS == targetUS.toInt().toFloat()) "US ${targetUS.toInt()}" else "US $targetUS"
-
-        // Range is validated against the detected ring's real limits AFTER
-        // auto-detection below (the defaults before detection are too wide).
+        val targetLabel = if (targetUS == targetUS.toInt().toFloat())
+            "US ${targetUS.toInt()}" else "US $targetUS"
         val ctx = requireContext()
-        val key = AiPrefs.apiKey(ctx)
-        val keyError = GeminiClient.validateApiKey(key)
-        if (keyError != null) {
-            setAiStatus("$keyError Open ⋯ → AI Assistant to save a key.", "#FF7A72")
-            return
-        }
 
         aiButton?.isEnabled = false
-        setAiStatus("🎯 Target: $targetLabel (%.2f mm) — capturing calibrated views…".format(targetMM), "#FFD54F")
+        aiUsChipRow?.isEnabled = false
+        aiUsChipRow?.let { for (i in 0 until it.childCount) it.getChildAt(i).isEnabled = false }
+        setAiStatus("🎯 Sizing to $targetLabel…", "#FFD54F")
+
         lifecycleScope.launch {
             try {
-                // Step 1: Ensure ring is detected
+                // ── 1. MEASURE ────────────────────────────────────────────────
                 if (!ringAnalyzed) {
-                    val detected = withContext(Dispatchers.IO) {
-                        var ok = false
-                        val latch = CountDownLatch(1)
-                        glRun {
-                            ok = try { NativeLib.nativeAnalyzeRing(targetMeshIdx) } catch (_: Exception) { false }
-                            latch.countDown()
-                        }
-                        latch.await()
-                        ok
-                    }
-                    if (!detected) throw IllegalArgumentException("Selected mesh is not recognized as a ring")
-                    val params = withContext(Dispatchers.IO) {
-                        var p = FloatArray(0)
-                        val latch = CountDownLatch(1)
-                        glRun {
-                            p = try { NativeLib.nativeGetRingParams() } catch (_: Exception) { FloatArray(0) }
-                            latch.countDown()
-                        }
-                        latch.await()
-                        p
-                    }
-                    if (params.size < 6) throw IllegalArgumentException("Ring measurements could not be read")
+                    val detected = glAwait { NativeLib.nativeAnalyzeRing(targetMeshIdx) } ?: false
+                    if (!detected) throw IllegalStateException("Selected mesh is not recognized as a ring")
+                    val params = glAwait { NativeLib.nativeGetRingParams() } ?: FloatArray(0)
+                    if (params.size < 6) throw IllegalStateException("Ring measurements could not be read")
                     withContext(Dispatchers.Main) { applyParams(params) }
                 }
+                val current = RingSizeEngine.RingState(
+                    innerDiameterMM = origInnerDiaMM,
+                    bandWidthMM = origBandWidthMM,
+                    heightMM = origHeightMM,
+                )
+                val limits = RingSizeEngine.Limits(
+                    idMin = idMin, idMax = idMax,
+                    bandMin = bwMin.coerceAtLeast(0.3f), bandMax = bwMax.coerceAtMost(6f),
+                    heightMin = hMin, heightMax = hMax,
+                )
 
-                // Step 2: Record BEFORE state
-                val beforeUs = RingMath.diamToUSSize(origInnerDiaMM)
-                val beforeUsLabel = RingMath.usSizeLabel(origInnerDiaMM)
-                val beforeMM = origInnerDiaMM
-                val beforeBW = origBandWidthMM
-                val beforeH = origHeightMM
-
-                if (targetMM < idMin || targetMM > idMax) {
-                    throw IllegalArgumentException(
-                        "Target $targetLabel (%.2f mm) is outside range [%.1f–%.1f mm]. " +
-                            "This ring's detected inner diameter is %.1f mm. " +
-                            "Try a larger US size or check the ring model.".format(
-                            targetMM, idMin, idMax, origInnerDiaMM))
+                // ── 2. COMPUTE (exact, no AI) ─────────────────────────────────
+                val plan = when (val r = RingSizeEngine.planForUsSize(current, targetUS, limits)) {
+                    is RingSizeEngine.Result.Ok -> r.plan
+                    is RingSizeEngine.Result.Error -> throw IllegalArgumentException(r.message)
                 }
 
-                // Step 3: Multi-angle vision capture
-                setAiStatus("🎯 $targetLabel — capturing top + side views…", "#FFD54F")
-                val topImage = withContext(Dispatchers.IO) {
-                    captureRingInspectionBase64(0) ?: capturePreviewBase64()
+                // ── 3. APPLY (exact geometry) ─────────────────────────────────
+                withContext(Dispatchers.Main) {
+                    applyRingValues(plan.targetInnerDiameterMM, plan.bandWidthMM, plan.heightMM)
                 }
-                if (topImage.isNullOrBlank()) throw IllegalStateException("Could not capture the ring preview")
-                val sideImage = withContext(Dispatchers.IO) { captureRingInspectionBase64(1) }
-                val images = listOfNotNull(topImage, sideImage)
 
-                // Step 4: AI analysis with retry
-                var fit: AiFitResult? = null
-                var lastReason = ""
-                var replyModel = ""
-                for (attempt in 0 until 2) {
-                    val feedback = if (attempt > 0 && lastReason.isNotBlank()) {
-                        "\nYour previous output was rejected: $lastReason. Return corrected values."
-                    } else ""
-                    val prompt = aiFitPrompt(targetUS, targetMM, beforeUsLabel, beforeMM, beforeBW, beforeH, feedback)
-                    val reply = GeminiClient.generate(
-                        apiKey = key,
-                        systemPrompt = AI_RING_FIT_SYSTEM_PROMPT,
-                        userPrompt = prompt,
-                        pngBase64 = images.firstOrNull(),
-                        extraImages = images.drop(1),
-                        model = AiPrefs.model(ctx)
-                    )
-                    replyModel = reply.model
-                    val json = parseAiFit(reply.text)
-                    val candidate = validateAiFit(json, targetMM, keepBand = beforeBW, keepHeight = beforeH)
-                    if (candidate == null) {
-                        lastReason = aiRejectReason(json)
-                        continue
-                    }
-                    fit = candidate
-                    lastReason = json.optString("reason", "Fit applied")
-                    break
+                // ── 4. VERIFY by re-measuring mm (instant, exact) ─────────────
+                kotlinx.coroutines.delay(120)  // let the pending deform apply on the GL thread
+                val after = glAwait { NativeLib.nativeGetRingParams() } ?: FloatArray(0)
+                val achieved = if (after.size >= 6)
+                    RingSizeEngine.RingState(after[3], after[2], after[5]) else achievedFallback(plan)
+                val sizeError = RingSizeEngine.verify(plan, achieved)
+
+                // ── 5. OPTIONAL structural inspection via Gemini ──────────────
+                // Purely advisory: confirms the mesh is still a clean, intact
+                // ring. It NEVER edits dimensions. Skipped silently with no key.
+                var advisory = ""
+                val key = AiPrefs.apiKey(ctx)
+                if (GeminiClient.validateApiKey(key) == null) {
+                    setAiStatus("🔍 Checking ring structure…", "#FFD54F")
+                    advisory = try {
+                        inspectStructure(key, AiPrefs.model(ctx), targetLabel, achieved)
+                    } catch (_: Exception) { "" }  // advisory is best-effort
                 }
-                val f = fit ?: throw IllegalArgumentException("Gemini measurements rejected twice ($lastReason)")
 
-                // Step 5: Apply the fit. Band width and height are kept close
-                // to the original values so the ring keeps its profile — only
-                // the size (inner diameter) changes.
-                var safeId = f.innerId.coerceIn(idMin, idMax)
-                var safeBw = preserveBand(f.band)
-                var safeH = preserveHeight(f.height)
-                applyRingValues(safeId, safeBw, safeH)
-
-                // Step 5.5: Post-change verification — re-capture the resized
-                // ring and let Gemini confirm it looks correct. If problems are
-                // found, Gemini proposes corrected values which we apply and
-                // re-verify — the AI actually acts on what it sees.
-                setAiStatus("🔍 Verifying resized ring…", "#FFD54F")
-                var verificationNote = ""
-                try {
-                    val (vNote, _) = verifyAndCorrect(
-                        key = key,
-                        model = AiPrefs.model(ctx),
-                        targetLabel = targetLabel,
-                        targetMM = targetMM,
-                        id = safeId, bw = safeBw, h = safeH
-                    ) { nid, nbw, nh ->
-                        safeId = nid; safeBw = nbw; safeH = nh
-                        applyRingValues(nid, nbw, nh)
-                    }
-                    verificationNote = vNote
-                } catch (_: Exception) { /* verification is best-effort */ }
-
-                // Step 6: Before → After comparison
-                val afterUsLabel = RingMath.usSizeLabel(safeId)
-                val delta = safeId - beforeMM
-                val direction = if (delta > 0.01f) "↑ Increased" else if (delta < -0.01f) "↓ Decreased" else "≈ Same"
-                val measured = f.measuredInner.takeIf { it > 0f }
-                val aiCheck = if (measured != null && beforeMM > 0f) {
-                    val dev = (measured - beforeMM) / beforeMM * 100f
-                    "\n🔍 AI measured: ${"%.2f".format(measured)} mm (±${"%.0f".format(kotlin.math.abs(dev))}% vs native)"
-                } else ""
+                // ── Report ────────────────────────────────────────────────────
                 val msg = buildString {
-                    append("✅ $replyModel\n")
-                    append("$direction: $beforeUsLabel (${"%.2f".format(beforeMM)} mm)")
-                    append(" → $afterUsLabel (${"%.2f".format(safeId)} mm)\n")
-                    append("Band: ${"%.2f".format(beforeBW)} → ${"%.2f".format(safeBw)} mm · ")
-                    append("Height: ${"%.2f".format(beforeH)} → ${"%.2f".format(safeH)} mm")
-                    if (aiCheck.isNotEmpty()) append(aiCheck)
-                    if (verificationNote.isNotEmpty()) append(verificationNote)
-                    append("\n💡 $lastReason")
+                    append("✅ Resized to $targetLabel\n")
+                    append("${plan.direction}: ${plan.fromUsLabel} (${"%.2f".format(current.innerDiameterMM)} mm)")
+                    append(" → ${RingMath.usSizeLabel(achieved.innerDiameterMM)} (${"%.2f".format(achieved.innerDiameterMM)} mm)\n")
+                    append("Band ${"%.2f".format(achieved.bandWidthMM)} mm · Height ${"%.2f".format(achieved.heightMM)} mm")
+                    if (sizeError != null) append("\n⚠️ $sizeError")
+                    if (advisory.isNotEmpty()) append("\n$advisory")
                 }
-                setAiStatus(msg, "#4CAF82")
+                setAiStatus(msg, if (sizeError == null) "#4CAF82" else "#FFD54F")
             } catch (e: GeminiClient.GeminiException) {
                 setAiStatus("Gemini: ${e.message}", "#FF7A72")
             } catch (e: Exception) {
-                setAiStatus("AI fit failed: ${e.message ?: "try again"}", "#FF7A72")
+                setAiStatus("Ring fit failed: ${e.message ?: "try again"}", "#FF7A72")
             } finally {
                 aiButton?.isEnabled = true
+                aiUsChipRow?.isEnabled = true
+                aiUsChipRow?.let { for (i in 0 until it.childCount) it.getChildAt(i).isEnabled = true }
             }
         }
     }
 
-    /** Keeps band width close to the original so the ring profile is preserved. */
-    private fun preserveBand(v: Float): Float =
-        v.coerceIn(bwMin, bwMax).coerceIn(origBandWidthMM * 0.5f, origBandWidthMM * 2f)
+    /** Fallback "achieved" state when native params can't be re-read post-apply. */
+    private fun achievedFallback(plan: RingSizeEngine.ResizePlan) =
+        RingSizeEngine.RingState(plan.targetInnerDiameterMM, plan.bandWidthMM, plan.heightMM)
 
-    /** Keeps height close to the original so the ring profile is preserved. */
-    private fun preserveHeight(v: Float): Float =
-        v.coerceIn(hMin, hMax).coerceIn(origHeightMM * 0.5f, origHeightMM * 2f)
+    /** Runs [block] on the GL thread and awaits its result (null on failure). */
+    private suspend fun <T> glAwait(block: () -> T): T? = withContext(Dispatchers.IO) {
+        var result: T? = null
+        val latch = CountDownLatch(1)
+        glRun {
+            result = try { block() } catch (_: Exception) { null }
+            latch.countDown()
+        }
+        latch.await()
+        result
+    }
 
     /** Applies new ring dimensions with a single undo snapshot. */
     private fun applyRingValues(id: Float, bw: Float, h: Float) {
@@ -834,200 +849,49 @@ class RingToolFragment : BottomSheetDialogFragment() {
     }
 
     /**
-     * Re-captures the resized ring and asks Gemini to verify it looks correct.
-     * If Gemini reports problems, it proposes corrected values which are applied
-     * and re-verified — up to one auto-correction round, then best-effort.
+     * OPTIONAL structural advisory. Sends ONE Gemini call with the top+side
+     * inspection shots and asks only whether the resized ring is structurally
+     * intact — it returns a short human note and never alters dimensions.
      */
-    private suspend fun verifyAndCorrect(
-        key: String,
-        model: String,
-        targetLabel: String,
-        targetMM: Float,
-        id: Float, bw: Float, h: Float,
-        apply: (Float, Float, Float) -> Unit
-    ): Pair<String, Boolean> {
-        var note = ""
-        var verified = false
-        var curId = id; var curBw = bw; var curH = h
-        for (round in 0 until 2) {
-            // Small delay so the native deformation finishes rendering
-            kotlinx.coroutines.delay(250)
-            val verifyTop = withContext(Dispatchers.IO) {
-                captureRingInspectionBase64(0) ?: capturePreviewBase64()
-            }
-            val verifySide = withContext(Dispatchers.IO) { captureRingInspectionBase64(1) }
-            val verifyImages = listOfNotNull(verifyTop, verifySide)
-            if (verifyImages.isEmpty()) break
-
-            val verifyPrompt = buildString {
-                append("VERIFICATION (round ${round + 1}): The ring was just resized to $targetLabel (inner ≈ ${"%.2f".format(curId)} mm).\n")
-                append("Expected: inner≈${"%.2f".format(curId)} mm, band≈${"%.2f".format(curBw)} mm, height≈${"%.2f".format(curH)} mm.\n")
-                append("Image 1 (TOP): RED = inner diameter, CYAN = band, WHITE bar = 10 mm.\n")
-                append("Image 2 (SIDE): GREEN = height, CYAN = band, WHITE bar = 10 mm.\n")
-                append("CHECK CAREFULLY:\n")
-                append("- Measure the inner diameter with the WHITE 10 mm bar — is it ≈ ${"%.1f".format(curId)} mm?\n")
-                append("- Is the ring still a clean, complete, round band? Any collapsed, inverted, torn or blown-out geometry?\n")
-                append("- Band width and height should be visually the same as before the resize (nearly unchanged).\n")
-                append("Return JSON only: {\"valid\": true/false, \"actualInnerDiameterMM\": number, \"assessment\": \"what you see\"}\n")
-                append("valid=true only if the ring is structurally correct AND the size matches.")
-            }
-            val verifyReply = GeminiClient.generate(
-                apiKey = key,
-                systemPrompt = "You verify a ring resize by inspecting the images. Use the white 10 mm bar for scale. Check that the ring is a clean, complete band with no collapsed or broken geometry, and that band and height are nearly unchanged.",
-                userPrompt = verifyPrompt,
-                pngBase64 = verifyImages.firstOrNull(),
-                extraImages = verifyImages.drop(1),
-                model = model
-            )
-            val vJson = parseAiFit(verifyReply.text)
-            val isValid = vJson.optBoolean("valid", true)
-            val actualDia = vJson.optDouble("actualInnerDiameterMM", Double.NaN)
-            val assessment = vJson.optString("assessment", "").ifBlank { "structure check" }
-            val diaStr = if (actualDia.isFinite()) "%.1f".format(actualDia.toFloat()) else "?"
-            // A large deviation between Gemini's measured diameter and the
-            // expected value means the resize did not land — treat it as a
-            // failed verification so the correction round actually fires.
-            val sizeMismatch = actualDia.isFinite() &&
-                kotlin.math.abs(actualDia.toFloat() - curId) > 0.75f
-            if (isValid && !sizeMismatch) {
-                note = "\n✅ Verified: ~$diaStr mm — $assessment"
-                verified = true
-                break
-            }
-            if (round == 1) {
-                note = if (sizeMismatch) {
-                    "\n⚠️ Verification: measured ~$diaStr mm but expected ~${"%.1f".format(curId)} mm — $assessment"
-                } else {
-                    "\n⚠️ Verification: $assessment"
-                }
-                break
-            }
-            // Round 0 failed → ask Gemini to correct what it saw
-            setAiStatus("🔧 Fixing ring per verification…", "#FFD54F")
-            val fixPrompt = buildString {
-                append("The verification of the resized ring found problems: \"$assessment\"\n")
-                append("User target: $targetLabel (inner ≈ ${"%.2f".format(targetMM)} mm).\n")
-                append("Current applied: inner≈${"%.2f".format(curId)} mm, band≈${"%.2f".format(curBw)} mm, height≈${"%.2f".format(curH)} mm.\n")
-                append("Keep band width and height nearly the same — only fix the size or the geometry issue you saw.\n")
-                append("Return JSON only: {\"innerDiameterMM\": number, \"bandWidthMM\": number, \"heightMM\": number, \"measuredInnerDiameterMM\": number, \"reason\": \"what you fixed and why\"}")
-            }
-            val fixReply = GeminiClient.generate(
-                apiKey = key,
-                systemPrompt = AI_RING_FIT_SYSTEM_PROMPT,
-                userPrompt = fixPrompt,
-                pngBase64 = verifyImages.firstOrNull(),
-                extraImages = verifyImages.drop(1),
-                model = model
-            )
-            val fixJson = parseAiFit(fixReply.text)
-            val fixCand = validateAiFit(fixJson, targetMM, keepBand = curBw, keepHeight = curH)
-            if (fixCand == null) {
-                note = "\n⚠️ Verification: $assessment (auto-fix values rejected)"
-                break
-            }
-            val newId = fixCand.innerId.coerceIn(idMin, idMax)
-            val newBw = preserveBand(fixCand.band)
-            val newH = preserveHeight(fixCand.height)
-            curId = newId; curBw = newBw; curH = newH
-            apply(newId, newBw, newH)
-            // loop continues → re-verify
+    private suspend fun inspectStructure(
+        key: String, model: String, targetLabel: String, achieved: RingSizeEngine.RingState,
+    ): String {
+        val top = withContext(Dispatchers.IO) { captureRingInspectionBase64(0) ?: capturePreviewBase64() }
+        val side = withContext(Dispatchers.IO) { captureRingInspectionBase64(1) }
+        val images = listOfNotNull(top, side)
+        if (images.isEmpty()) return ""
+        val prompt = buildString {
+            append("A ring was resized to $targetLabel ")
+            append("(inner ≈ ${"%.2f".format(achieved.innerDiameterMM)} mm, ")
+            append("band ≈ ${"%.2f".format(achieved.bandWidthMM)} mm, ")
+            append("height ≈ ${"%.2f".format(achieved.heightMM)} mm).\n")
+            append("Image 1 (TOP), Image 2 (SIDE). The dimensions are already correct and verified numerically — ")
+            append("do NOT judge or re-measure the size.\n")
+            append("Only check STRUCTURE: is it a clean, complete, round band with no collapsed, ")
+            append("inverted, torn or blown-out geometry?\n")
+            append("Return JSON only: {\"intact\": true/false, \"note\": \"one short sentence\"}")
         }
-        return note to verified
+        val reply = GeminiClient.generate(
+            apiKey = key,
+            systemPrompt = "You inspect 3D ring meshes for structural integrity only. " +
+                "You never change or judge dimensions. Reply with the requested JSON only.",
+            userPrompt = prompt,
+            pngBase64 = images.firstOrNull(),
+            extraImages = images.drop(1),
+            model = model,
+        )
+        val json = parseAiJson(reply.text) ?: return ""
+        val intact = json.optBoolean("intact", true)
+        val note = json.optString("note", "").ifBlank { "structure check" }
+        return if (intact) "🔍 Structure OK — $note" else "⚠️ Structure: $note"
     }
 
-    private fun parseAiFit(raw: String?): JSONObject {
+    /** Lenient JSON extraction from a model reply; null when no object is found. */
+    private fun parseAiJson(raw: String?): JSONObject? {
         val text = raw.orEmpty().replace("```json", "", true).replace("```", "").trim()
         val start = text.indexOf('{'); val end = text.lastIndexOf('}')
-        if (start < 0 || end <= start) throw IllegalArgumentException("Gemini did not return JSON")
-        return JSONObject(text.substring(start, end + 1))
-    }
-
-    /** Validated Gemini ring-fit output. */
-    private data class AiFitResult(
-        val innerId: Float,
-        val band: Float,
-        val height: Float,
-        val measuredInner: Float
-    )
-
-    /** Builds the AI prompt with the measured geometry + both-view legend. */
-    private fun aiFitPrompt(targetUS: Float, targetMM: Float, beforeUsLabel: String,
-                            beforeMM: Float, beforeBW: Float, beforeH: Float,
-                            feedback: String): String {
-        val targetLabel = if (targetUS == targetUS.toInt().toFloat()) "US ${targetUS.toInt()}" else "US $targetUS"
-        return """
-            You are AuraCAD's ring sizing assistant. You get TWO calibrated ring images with a WHITE 10 mm scale bar in each.
-            Image 1 (TOP view): RED line = current inner diameter, CYAN line = band width, WHITE bar = 10 mm.
-            Image 2 (SIDE view): GREEN line = ring height, CYAN line = band width, WHITE bar = 10 mm.
-
-            TASK: The user wants this ring resized to $targetLabel (inner diameter ≈ ${"%.2f".format(targetMM)} mm).
-
-            CURRENT STATE (from native detection):
-            - Inner diameter: ${"%.2f".format(beforeMM)} mm ($beforeUsLabel)
-            - Band width: ${"%.2f".format(beforeBW)} mm
-            - Height: ${"%.2f".format(beforeH)} mm
-
-            YOUR JOB:
-            1. Visually measure the CURRENT inner diameter from Image 1 using the white scale bar.
-            2. The user wants ONLY the SIZE changed. KEEP band width and height UNCHANGED — report the current values back exactly as given above. Do not invent new band width or height.
-            3. Return the TARGET values that achieve $targetLabel: innerDiameterMM must be ≈ ${"%.2f".format(targetMM)} mm.
-            4. US ring sizes are NEVER negative. The smallest standard US size is US 1 — if any calculation gives a negative US size, clamp it to US 1.
-            5. If the current ring already matches $targetLabel, return the same values.
-
-            JSON schema exactly:
-            {"innerDiameterMM": number, "bandWidthMM": number, "heightMM": number, "measuredInnerDiameterMM": number, "reason": "short explanation of what you measured and what you changed"}
-            Do not include markdown or extra keys. Keep all values positive. Never use negative numbers.$feedback
-        """.trimIndent()
-    }
-
-    /**
-     * Validates a parsed AI fit. Returns an [AiFitResult] when safe, or null
-     * when the values are missing/non-finite/physically impossible. Band width
-     * and height are clamped close to the pre-resize values ([keepBand]/[keepHeight])
-     * so the ring keeps its profile. The inner diameter is snapped to the
-     * nearest standard US size for manufacturability (kept inside the range).
-     */
-    private fun validateAiFit(json: JSONObject, target: Float,
-                              keepBand: Float, keepHeight: Float): AiFitResult? {
-        val id = json.optDouble("innerDiameterMM", Double.NaN)
-        val bw = json.optDouble("bandWidthMM", Double.NaN)
-        val h  = json.optDouble("heightMM", Double.NaN)
-        val measured = json.optDouble("measuredInnerDiameterMM", Double.NaN)
-        if (!id.isFinite() || !bw.isFinite() || !h.isFinite()) return null
-        var fId = id.toFloat(); var fBw = bw.toFloat(); var fH = h.toFloat()
-        if (fId <= 0f || fBw <= 0f || fH <= 0f) return null
-        // Preserve the ring profile: band and height stay near the current
-        // (pre-resize) values — only the size changes.
-        if (keepBand > 0f) fBw = fBw.coerceIn(keepBand * 0.5f, keepBand * 2f)
-        if (keepHeight > 0f) fH = fH.coerceIn(keepHeight * 0.5f, keepHeight * 2f)
-        // Physical sanity — a real ring can't have these proportions.
-        // (Floor kept low so very thin preserved bands are not rejected.)
-        if (fBw < 0.2f || fBw > 6f) return null
-        if (fH < 0.4f || fH > 20f) return null
-        if (fBw >= fId * 0.45f) return null
-        // The requested target must win — AI should land near it.
-        val snapped = RingMath.usSizeToDiam(RingMath.diamToUSSize(fId))
-        val finalId = if (kotlin.math.abs(snapped - fId) <= 0.3f) snapped else fId
-        if (finalId < idMin || finalId > idMax) return null
-        return AiFitResult(
-            innerId = finalId,
-            band = fBw,
-            height = fH,
-            measuredInner = if (measured.isFinite() && measured > 0) measured.toFloat() else -1f
-        )
-    }
-
-    /** Human-readable reason an AI fit was rejected (fed back on retry). */
-    private fun aiRejectReason(json: JSONObject): String {
-        val id = json.optDouble("innerDiameterMM", Double.NaN)
-        val bw = json.optDouble("bandWidthMM", Double.NaN)
-        val h  = json.optDouble("heightMM", Double.NaN)
-        return when {
-            !id.isFinite() || !bw.isFinite() || !h.isFinite() -> "missing or non-numeric values"
-            bw <= 0 || bw > 6 -> "band width %.2f mm out of range".format(bw)
-            h <= 0 || h > 20 -> "height %.2f mm out of range".format(h)
-            else -> "values outside the detected ring range"
-        }
+        if (start < 0 || end <= start) return null
+        return try { JSONObject(text.substring(start, end + 1)) } catch (_: Exception) { null }
     }
 
     private suspend fun capturePreviewBase64(): String? {
@@ -1118,9 +982,20 @@ class RingToolFragment : BottomSheetDialogFragment() {
 
     /** Highlights the chip at [idx] and dims all others. */
     private fun highlightAiChipAt(idx: Int) {
+        val ctx = context ?: return
         aiUsChipRow?.let { row ->
             for (i in 0 until row.childCount) {
-                row.getChildAt(i).alpha = if (i == idx) 1f else 0.5f
+                val chip = row.getChildAt(i)
+                val selected = i == idx
+                // Clear selected state gives a filled accent look; unselected
+                // stays the plain dark card. Alpha alone was too subtle to read.
+                chip.background = ctx.getDrawable(
+                    if (selected) R.drawable.bg_chip_selected_violet else R.drawable.bg_card_dark
+                )
+                chip.alpha = if (selected) 1f else 0.7f
+                (chip as? Button)?.setTextColor(
+                    Color.parseColor(if (selected) "#FFFFFF" else "#A78BFA")
+                )
             }
         }
     }
@@ -1164,24 +1039,5 @@ class RingToolFragment : BottomSheetDialogFragment() {
     companion object {
         const val TAG = "RingTool"
         fun newInstance() = RingToolFragment()
-
-        private val AI_RING_FIT_SYSTEM_PROMPT = """
-You are AuraCAD's precise jewelry fitting assistant. You help users resize rings to specific US ring sizes.
-
-You receive TWO calibrated close-up images of a ring with dimension callouts and a 10 mm scale bar:
-- Image 1 (TOP view, looking down the ring axis): RED line = inner diameter across the opening, CYAN line = band width, WHITE bar = 10 mm.
-- Image 2 (SIDE view, edge-on): GREEN line = ring height along its axis, CYAN line = band width, WHITE bar = 10 mm.
-
-INSTRUCTIONS:
-1. Use the WHITE bars to convert pixels to mm — this is your calibration reference.
-2. Visually measure the CURRENT inner diameter from Image 1 (RED line).
-3. Cross-check height against Image 2 (GREEN line).
-4. The user specifies a TARGET US ring size. Use the standard formula: inner diameter (mm) = US size × 0.4064 + 12.7.
-5. Return manufacturable values: band 0.5–6 mm, height 0.5–20 mm.
-6. US ring sizes are NEVER negative. The smallest standard US size is US 1. If any calculation gives a negative US size, clamp it to US 1 and mention it.
-7. When the user requests a SIZE change, keep band width and height UNCHANGED from the values in the prompt — only the inner diameter changes.
-8. Never invent unsafe geometry. If the ring already matches the target, say so.
-9. Return ONLY the requested JSON — no markdown, no extra keys.
-""".trimIndent()
     }
 }

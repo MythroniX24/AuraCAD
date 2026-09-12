@@ -40,8 +40,11 @@ object NativeLib {
     external fun nativeGetGizmoMode(): Int
     /** Returns the gizmo axis under the screen point, or -1 when the point is not on an axis. */
     external fun nativeHitTestGizmo(sx: Float, sy: Float, sw: Float, sh: Float): Int
-    /** One-finger drag while a gizmo tool is active. start=true pushes one undo. */
-    external fun nativeGizmoDrag(dx: Float, dy: Float, start: Boolean)
+    /** One-finger drag while a gizmo tool is active, constrained to [axis]
+     *  (0=X, 1=Y, 2=Z; <0 = legacy free mode). start=true pushes one undo. */
+    external fun nativeGizmoDrag(dx: Float, dy: Float, axis: Int, start: Boolean)
+    /** Clears the active-axis highlight when a gizmo gesture ends. */
+    external fun nativeGizmoDragEnd()
 
     // Global transform
     external fun nativeSetRotation(x: Float, y: Float, z: Float)

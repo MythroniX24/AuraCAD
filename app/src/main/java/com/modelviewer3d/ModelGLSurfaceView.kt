@@ -174,11 +174,12 @@ class ModelGLSurfaceView @JvmOverloads constructor(
                             gizmoHitAxis = -1
                         }
                         if (gizmoTool != 0 && !gizmoHitPending && gizmoHitAxis >= 0) {
+                            val axis = gizmoHitAxis
                             if (!gizmoUndoPushed) {
                                 gizmoUndoPushed = true
-                                queueEvent { NativeLib.nativeGizmoDrag(0f, 0f, true) } // one undo per gesture
+                                queueEvent { NativeLib.nativeGizmoDrag(0f, 0f, axis, true) } // one undo per gesture
                             }
-                            queueEvent { NativeLib.nativeGizmoDrag(dx, dy, false) }
+                            queueEvent { NativeLib.nativeGizmoDrag(dx, dy, axis, false) }
                         } else {
                             // A selected tool is not a blanket transform mode:
                             // only a real gizmo-handle hit transforms the model.
@@ -208,6 +209,7 @@ class ModelGLSurfaceView @JvmOverloads constructor(
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 isScaling = false
+                if (gizmoUndoPushed) queueEvent { NativeLib.nativeGizmoDragEnd() }
                 gizmoUndoPushed = false
                 ++gestureGeneration
                 gizmoHitPending = false

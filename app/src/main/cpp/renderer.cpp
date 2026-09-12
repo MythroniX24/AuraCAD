@@ -282,7 +282,14 @@ void Renderer::drawGizmo(const Mat4& proj,const Mat4& view){
     static const float kCols[3][3]={{1.0f,0.25f,0.25f},{0.25f,1.0f,0.3f},{0.3f,0.6f,1.0f}};
     for(int a=0;a<3;++a){
         if(m_gizAxisCount[a]<=0) continue;
-        glUniform4f(m_uloc.wireColor,kCols[a][0],kCols[a][1],kCols[a][2],1.0f);
+        if(a==m_gizActiveAxis){
+            // Active handle: bright yellow + thicker so the grabbed axis is obvious.
+            glUniform4f(m_uloc.wireColor,1.0f,0.95f,0.2f,1.0f);
+            glLineWidth(4.5f);
+        } else {
+            glUniform4f(m_uloc.wireColor,kCols[a][0],kCols[a][1],kCols[a][2],1.0f);
+            glLineWidth(2.5f);
+        }
         glDrawArrays(GL_LINES,m_gizAxisOffset[a],m_gizAxisCount[a]);
     }
     glBindVertexArray(0);
@@ -386,36 +393,97 @@ int Renderer::hitTestGizmo(float sx,float sy,float sw,float sh) const {
 }
 
 // One-finger drag while a gizmo tool is active.  start=true = push one undo
-// snapshot and return; subsequent calls stream deltas on the GLOBAL transform.
-void Renderer::gizmoDrag(float dx,float dy,bool start){
+// snapshot and return; subsequent calls stream deltas constrained to [axis]
+// (0=X, 1=Y, 2=Z).  axis<0 falls back to the old screen-plane / uniform mode.
+void Renderer::gizmoDrag(float dx,float dy,int axis,bool start){
     if(m_gizmoMode<=0) return;
+    m_gizActiveAxis=axis;              // highlight the handle being manipulated
     if(start){ pushUndoState(); return; }
+
+    // ── Project the anchor + the picked world axis to screen space ───────────
+    // Moving `m_gizAnchorSize` world units along the axis maps to a pixel
+    // vector on screen; we drag ALONG that vector so motion tracks the finger.
+    const float sw=(float)std::max(m_width,1), sh=(float)std::max(m_height,1);
+    Vec3 axisDir{axis==0?1.f:0.f, axis==1?1.f:0.f, axis==2?1.f:0.f};
+
+    bool haveScreenAxis=false;
+    float auX=0.f, auY=0.f, axPixLen=0.f;   // unit screen-axis dir + its length
+    if(axis>=0 && axis<3 && m_gizAnchorValid && m_gizAnchorSize>1e-6f){
+        const float aspect=sw/std::max(sh,1.f);
+        Mat4 proj=Mat4::perspective(60.f*DEG2RAD,aspect,0.01f,100.f);
+        Vec3 eye=cameraEye();
+        Mat4 view=Mat4::lookAt(eye,{m_panX,m_panY,0},{0,1,0});
+        auto toScreen=[&](float x,float y,float z,float& ox,float& oy)->bool{
+            float vx=view.m[0]*x+view.m[4]*y+view.m[8]*z+view.m[12];
+            float vy=view.m[1]*x+view.m[5]*y+view.m[9]*z+view.m[13];
+            float vz=view.m[2]*x+view.m[6]*y+view.m[10]*z+view.m[14];
+            float px=proj.m[0]*vx+proj.m[4]*vy+proj.m[8]*vz+proj.m[12];
+            float py=proj.m[1]*vx+proj.m[5]*vy+proj.m[9]*vz+proj.m[13];
+            float pw=proj.m[3]*vx+proj.m[7]*vy+proj.m[11]*vz+proj.m[15];
+            if(pw<=1e-5f) return false;
+            ox=(px/pw+1.f)*0.5f*sw;
+            oy=(1.f-py/pw)*0.5f*sh;
+            return true;
+        };
+        float s0x,s0y,s1x,s1y;
+        float ex=m_gizAnchorCx+axisDir.x*m_gizAnchorSize;
+        float ey=m_gizAnchorCy+axisDir.y*m_gizAnchorSize;
+        float ez=m_gizAnchorCz+axisDir.z*m_gizAnchorSize;
+        if(toScreen(m_gizAnchorCx,m_gizAnchorCy,m_gizAnchorCz,s0x,s0y) &&
+           toScreen(ex,ey,ez,s1x,s1y)){
+            float vX=s1x-s0x, vY=s1y-s0y;
+            axPixLen=std::sqrt(vX*vX+vY*vY);
+            if(axPixLen>1.f){ auX=vX/axPixLen; auY=vY/axPixLen; haveScreenAxis=true; }
+        }
+    }
+    // Signed finger travel projected onto the screen-space axis (pixels).
+    float along = haveScreenAxis ? (dx*auX+dy*auY) : dx;
+
     const float k = 2.0f*m_camDist/(float)std::max(m_height,1);
-    if(m_gizmoMode==1){ // MOVE — translate in the camera's right/up plane
-        float cp=cosf(m_camPitch),sp=sinf(m_camPitch);
-        float cy=cosf(m_camYaw), sy=sinf(m_camYaw);
-        Vec3 fwd{cp*sy,sp,cp*cy};
-        Vec3 up{0,1,0};
-        Vec3 right=fwd.cross(up).normalized();
-        Vec3 upw=up - fwd*up.dot(fwd);
-        upw=upw.normalized();
-        Vec3 d = right*(dx*k) - upw*(dy*k);
-        m_posX+=d.x; m_posY+=d.y; m_posZ+=d.z;
-    } else if(m_gizmoMode==2){ // ROTATE — yaw around world Y, pitch around view axis
-        m_rotY+=dx*0.4f;
-        m_rotX-=dy*0.4f;
-        m_rotX=std::fmodf(m_rotX+180.f,360.f); if(m_rotX<0) m_rotX+=360.f; m_rotX-=180.f;
-        m_rotY=std::fmodf(m_rotY+180.f,360.f); if(m_rotY<0) m_rotY+=360.f; m_rotY-=180.f;
-    } else if(m_gizmoMode==3){ // SCALE — uniform by vertical drag
-        float f=1.0f+dy*0.01f;
-        if(f<0.95f) f=0.95f;
-        if(f>1.05f) f=1.05f;
-        m_scaX*=f; m_scaY*=f; m_scaZ*=f;
-        float m=std::max(std::fabsf(m_scaX),std::max(std::fabsf(m_scaY),std::fabsf(m_scaZ)));
-        if(m>8.0f){ float r=8.0f/m; m_scaX*=r;m_scaY*=r;m_scaZ*=r; }
-        if(m<0.02f){ float r=0.02f/m; m_scaX*=r;m_scaY*=r;m_scaZ*=r; }
+
+    if(m_gizmoMode==1){ // ── MOVE — translate along the picked world axis ─────
+        if(haveScreenAxis){
+            // px→world: size world units span axPixLen px along this axis.
+            float world = along / axPixLen * m_gizAnchorSize;
+            m_posX+=axisDir.x*world; m_posY+=axisDir.y*world; m_posZ+=axisDir.z*world;
+        } else if(axis>=0 && axis<3){
+            m_posX+=axisDir.x*along*k; m_posY+=axisDir.y*along*k; m_posZ+=axisDir.z*along*k;
+        } else { // legacy screen-plane fallback
+            float cp=cosf(m_camPitch),sp=sinf(m_camPitch);
+            float cyw=cosf(m_camYaw), syw=sinf(m_camYaw);
+            Vec3 fwd{cp*syw,sp,cp*cyw}, up{0,1,0};
+            Vec3 right=fwd.cross(up).normalized();
+            Vec3 upw=(up - fwd*up.dot(fwd)).normalized();
+            Vec3 d = right*(dx*k) - upw*(dy*k);
+            m_posX+=d.x; m_posY+=d.y; m_posZ+=d.z;
+        }
+    } else if(m_gizmoMode==2){ // ── ROTATE — about the picked axis only ───────
+        // Drag PERPENDICULAR to the axis' screen projection spins its ring.
+        float amount;
+        if(haveScreenAxis){ float pX=-auY, pY=auX; amount=dx*pX+dy*pY; }
+        else               { amount=dx+dy; }
+        const float degPerPx=0.4f;
+        float* r = (axis==0)?&m_rotX : (axis==1)?&m_rotY : &m_rotZ;
+        if(axis<0||axis>2){ // legacy yaw+pitch fallback
+            m_rotY+=dx*degPerPx; m_rotX-=dy*degPerPx; r=nullptr;
+        } else {
+            *r += amount*degPerPx;
+        }
+        auto wrap=[](float& a){ a=std::fmodf(a+180.f,360.f); if(a<0)a+=360.f; a-=180.f; };
+        wrap(m_rotX); wrap(m_rotY); wrap(m_rotZ);
+    } else if(m_gizmoMode==3){ // ── SCALE — along the picked axis only ────────
+        float f=1.0f+along*0.01f;
+        if(f<0.9f) f=0.9f;
+        if(f>1.1f) f=1.1f;
+        if(axis==0)      m_scaX*=f;
+        else if(axis==1) m_scaY*=f;
+        else if(axis==2) m_scaZ*=f;
+        else { m_scaX*=f; m_scaY*=f; m_scaZ*=f; } // legacy uniform fallback
+        auto clampS=[&](float& s){ if(s>8.f)s=8.f; if(s<0.02f)s=0.02f; if(s>-0.02f&&s<0.f)s=-0.02f; };
+        clampS(m_scaX); clampS(m_scaY); clampS(m_scaZ);
     }
 }
+
 
 void Renderer::buildShaders(){
     if(m_mainProg) glDeleteProgram(m_mainProg);
@@ -1145,12 +1213,30 @@ static Vec3 applyMat4Point(const Mat4& mat, float x, float y, float z) {
         mat.m[2]*x + mat.m[6]*y + mat.m[10]*z + mat.m[14]
     };
 }
-// Transform a normal using the upper-left 3x3 of the matrix, then renormalize
+// Transform a normal using the upper-left 3x3 of the matrix, then renormalize.
+// NOTE: this is only correct for uniform scale / rotation.  For export under
+// non-uniform resize, use applyNormalMat3() with a precomputed inverse-transpose
+// normal matrix (Mat4::toNormalMatrix) so surface normals stay perpendicular.
 static Vec3 applyMat4Normal(const Mat4& mat, float nx, float ny, float nz) {
     Vec3 n{
         mat.m[0]*nx + mat.m[4]*ny + mat.m[8]*nz,
         mat.m[1]*nx + mat.m[5]*ny + mat.m[9]*nz,
         mat.m[2]*nx + mat.m[6]*ny + mat.m[10]*nz
+    };
+    float len = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
+    if(len > 1e-9f){ n.x /= len; n.y /= len; n.z /= len; }
+    return n;
+}
+
+// Transform a normal by a column-major 3x3 normal matrix (nm[col*3+row]),
+// then renormalize.  nm is produced by Mat4::toNormalMatrix (inverse-transpose),
+// so this stays correct for non-uniform scale — the reason resized exports no
+// longer look faceted / wrongly lit.
+static inline Vec3 applyNormalMat3(const float nm[9], float nx, float ny, float nz) {
+    Vec3 n{
+        nm[0]*nx + nm[3]*ny + nm[6]*nz,
+        nm[1]*nx + nm[4]*ny + nm[7]*nz,
+        nm[2]*nx + nm[5]*ny + nm[8]*nz
     };
     float len = sqrtf(n.x*n.x + n.y*n.y + n.z*n.z);
     if(len > 1e-9f){ n.x /= len; n.y /= len; n.z /= len; }
@@ -1177,13 +1263,14 @@ bool Renderer::exportOBJ(const std::string& path) const {
         float toMM = mmPerUnit();
         Mat4 mmConv = Mat4::scale(toMM, toMM, toMM);
         Mat4 model  = global * buildMeshMatrix(mo) * mmConv;
+        float nm[9]; model.toNormalMatrix(nm);   // inverse-transpose: correct under non-uniform scale
 
         for(const auto& v : mo.vertices){
             Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
             f << "v " << p.x << " " << p.y << " " << p.z << "\n";
         }
         for(const auto& v : mo.vertices){
-            Vec3 n = applyMat4Normal(model, v.nx, v.ny, v.nz);
+            Vec3 n = applyNormalMat3(nm, v.nx, v.ny, v.nz);
             f << "vn " << n.x << " " << n.y << " " << n.z << "\n";
         }
         for(size_t i = 0; i+2 < mo.indices.size(); i+=3){
@@ -1270,9 +1357,10 @@ bool Renderer::exportPLY(const std::string& path) const {
     for(const auto& mo : m_meshes){
         if(!mo.visible) continue;
         Mat4 model = global * buildMeshMatrix(mo) * mmConv;
+        float nm[9]; model.toNormalMatrix(nm);   // inverse-transpose: correct under non-uniform scale
         for(const auto& v : mo.vertices){
             Vec3 p = applyMat4Point(model, v.px, v.py, v.pz);
-            Vec3 n = applyMat4Normal(model, v.nx, v.ny, v.nz);
+            Vec3 n = applyNormalMat3(nm, v.nx, v.ny, v.nz);
             f << p.x << " " << p.y << " " << p.z << " "
               << n.x << " " << n.y << " " << n.z << "\n";
         }
@@ -1352,6 +1440,7 @@ bool Renderer::exportGLB(const std::string& path) const {
         if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
         bool u16 = mo.vertices.size() <= 65535;
         Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
+        float nm[9]; mtx.toNormalMatrix(nm);   // inverse-transpose: correct under non-uniform scale
 
         uint64_t posOff = bin.size();
         for (const auto& v : mo.vertices) {
@@ -1362,7 +1451,7 @@ bool Renderer::exportGLB(const std::string& path) const {
         }
         uint64_t norOff = bin.size();
         for (const auto& v : mo.vertices) {
-            Vec3 n = applyMat4Normal(mtx, v.nx, v.ny, v.nz);
+            Vec3 n = applyNormalMat3(nm, v.nx, v.ny, v.nz);
             float f[3] = {n.x, n.y, n.z};
             bin.insert(bin.end(), reinterpret_cast<const uint8_t*>(f),
                        reinterpret_cast<const uint8_t*>(f) + 12);
@@ -1481,25 +1570,27 @@ bool Renderer::export3DS(const std::string& path) const {
 
     std::vector<uint8_t> editor;   // 0x3D3D content
     int meshIndex = 0;
-    for (const auto& mo : m_meshes) {
-        if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
-        if (mo.vertices.size() > 65535) continue;   // 3DS uses u16 indices
-        Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
 
+    // Emit one 0x4000 object (name + 0x4100 tri-mesh) from a set of triangles
+    // that reference at most 65535 unique vertices. positions are already in
+    // world/mm space. localIdx maps triangle corners to compacted vertex ids.
+    auto emitObject = [&](const std::string& name,
+                          const std::vector<Vec3>& verts,
+                          const std::vector<uint16_t>& idx) {
         std::vector<uint8_t> objData;   // 0x4000 content: name + 0x4100
-        std::string name = mo.name.empty() ? "Mesh" + std::to_string(meshIndex) : mo.name;
+        // 3DS object name is a plain null-terminated ASCII string with NO
+        // even-length padding (per spec). Writing a pad byte here desyncs
+        // spec-compliant readers, so emit just the NUL terminator.
         for (char ch : name) objData.push_back((uint8_t)ch);
         objData.push_back(0);
-        if (objData.size() & 1) objData.push_back(0);   // pad name to even length
 
         std::vector<uint8_t> triData;   // 0x4100 content: 0x4110 + 0x4120
         {
             std::vector<uint8_t> vd;    // 0x4110: u16 count + vertices
-            uint16_t vc = (uint16_t)mo.vertices.size();
+            uint16_t vc = (uint16_t)verts.size();
             vd.insert(vd.end(), reinterpret_cast<const uint8_t*>(&vc),
                       reinterpret_cast<const uint8_t*>(&vc) + 2);
-            for (const auto& v : mo.vertices) {
-                Vec3 p = applyMat4Point(mtx, v.px, v.py, v.pz);
+            for (const auto& p : verts) {
                 float f3[3] = {p.x, p.y, p.z};
                 vd.insert(vd.end(), reinterpret_cast<const uint8_t*>(f3),
                           reinterpret_cast<const uint8_t*>(f3) + 12);
@@ -1508,12 +1599,11 @@ bool Renderer::export3DS(const std::string& path) const {
         }
         {
             std::vector<uint8_t> fd;    // 0x4120: u16 count + (3×u16 idx + u16 flags)
-            uint16_t fc = (uint16_t)(mo.indices.size() / 3);
+            uint16_t fc = (uint16_t)(idx.size() / 3);
             fd.insert(fd.end(), reinterpret_cast<const uint8_t*>(&fc),
                       reinterpret_cast<const uint8_t*>(&fc) + 2);
-            for (size_t i = 0; i < mo.indices.size(); i += 3) {
-                uint16_t t[4] = {(uint16_t)mo.indices[i+0], (uint16_t)mo.indices[i+1],
-                                 (uint16_t)mo.indices[i+2], 0};
+            for (size_t i = 0; i + 2 < idx.size(); i += 3) {
+                uint16_t t[4] = {idx[i+0], idx[i+1], idx[i+2], 0};
                 fd.insert(fd.end(), reinterpret_cast<const uint8_t*>(t),
                           reinterpret_cast<const uint8_t*>(t) + 8);
             }
@@ -1521,6 +1611,61 @@ bool Renderer::export3DS(const std::string& path) const {
         }
         appendChunk(objData, 0x4100, triData);
         appendChunk(editor, 0x4000, objData);
+    };
+
+    for (const auto& mo : m_meshes) {
+        if (!mo.visible || mo.vertices.empty() || mo.indices.empty()) continue;
+        Mat4 mtx = global * buildMeshMatrix(mo) * mmConv;
+        std::string baseName = mo.name.empty() ? "Mesh" + std::to_string(meshIndex) : mo.name;
+
+        // 3DS uses u16 vertex indices (max 65535 verts per object). Rather than
+        // DROP meshes above that limit (which silently reduced poly count and
+        // file size after loading detailed models), split them into as many
+        // sub-objects as needed, re-indexing each chunk locally. No geometry is
+        // ever lost — the whole mesh survives the round-trip.
+        constexpr uint32_t kMaxVerts = 65535;
+        std::vector<int32_t> remap(mo.vertices.size(), -1);
+        std::vector<Vec3>    chunkVerts;
+        std::vector<uint16_t> chunkIdx;
+        int part = 0;
+
+        auto flushChunk = [&]() {
+            if (chunkIdx.empty()) return;
+            std::string nm = (part == 0) ? baseName
+                                         : baseName + "_" + std::to_string(part);
+            emitObject(nm, chunkVerts, chunkIdx);
+            ++part;
+            // reset for the next chunk
+            std::fill(remap.begin(), remap.end(), -1);
+            chunkVerts.clear();
+            chunkIdx.clear();
+        };
+
+        for (size_t i = 0; i + 2 < mo.indices.size(); i += 3) {
+            unsigned int tri[3] = { mo.indices[i+0], mo.indices[i+1], mo.indices[i+2] };
+            // How many NEW vertices would this triangle add to the current chunk?
+            uint32_t newVerts = 0;
+            for (int k = 0; k < 3; ++k)
+                if (tri[k] < remap.size() && remap[tri[k]] < 0) ++newVerts;
+            if (chunkVerts.size() + newVerts > kMaxVerts) flushChunk();
+
+            uint16_t local[3];
+            for (int k = 0; k < 3; ++k) {
+                unsigned int gi = tri[k];
+                if (gi >= mo.vertices.size()) { local[k] = 0; continue; }
+                if (remap[gi] < 0) {
+                    const auto& v = mo.vertices[gi];
+                    Vec3 p = applyMat4Point(mtx, v.px, v.py, v.pz);
+                    remap[gi] = (int32_t)chunkVerts.size();
+                    chunkVerts.push_back(p);
+                }
+                local[k] = (uint16_t)remap[gi];
+            }
+            chunkIdx.push_back(local[0]);
+            chunkIdx.push_back(local[1]);
+            chunkIdx.push_back(local[2]);
+        }
+        flushChunk();
         ++meshIndex;
     }
     if (editor.empty()) return false;
@@ -2428,6 +2573,94 @@ bool Renderer::analyzeRing(int meshIdx) {
     float outerR = sortedR[(size_t)(N * 0.97f)];
     if (outerR - innerR < 1e-7f) return false;
 
+    // ── Pass 5: least-squares CIRCLE FIT of the inner bore ────────────────────
+    // The percentile radius above is robust but only a single scalar and is
+    // biased by inner chamfers/engraving; it also can't detect an oval bore.
+    // Here we collect the bore-surface vertices (those near innerR), project
+    // them onto the ring plane, and fit a circle (Kåsa algebraic fit). This
+    // yields a truer mean radius, a re-centered bore center, and — crucially —
+    // roundness/ovality/confidence metrics so the UI can report measurement
+    // trust. Deformation still uses this fitted radius as the authoritative
+    // inner diameter.
+    {
+        // Build an orthonormal basis (u,v) spanning the ring plane (⊥ axis).
+        Vec3 up = (fabsf(axisRefined.y) < 0.9f) ? Vec3{0,1,0} : Vec3{1,0,0};
+        Vec3 u  = axisRefined.cross(up);
+        float ul = sqrtf(u.x*u.x+u.y*u.y+u.z*u.z);
+        if (ul > 1e-9f) { u.x/=ul; u.y/=ul; u.z/=ul; }
+        Vec3 vv = axisRefined.cross(u);  // already unit (axis⊥u, both unit)
+
+        // Bore band: vertices whose radius sits in a tight shell around innerR.
+        // Widen slightly (up to 25% of the wall) so we get enough points but
+        // never reach into the outer surface.
+        float band   = std::min(0.25f * (outerR - innerR), 0.35f * innerR);
+        float loCut  = innerR - band * 0.5f;
+        float hiCut  = innerR + band;
+        double su=0, sv=0; int nb=0;
+        std::vector<float> bu, bv;
+        bu.reserve(N); bv.reserve(N);
+        for (size_t i = 0; i < N; ++i) {
+            if (radii[i] < loCut || radii[i] > hiCut) continue;
+            const auto& vtx = mo.vertices[i];
+            float dx = vtx.px-cen.x, dy = vtx.py-cen.y, dz = vtx.pz-cen.z;
+            float pu = dx*u.x + dy*u.y + dz*u.z;   // in-plane coords
+            float pv = dx*vv.x + dy*vv.y + dz*vv.z;
+            bu.push_back(pu); bv.push_back(pv);
+            su += pu; sv += pv; ++nb;
+        }
+
+        float fitR = innerR;             // fallback: percentile radius
+        float cu = 0, cv = 0;            // fitted center offset in-plane
+        float rmsResid = 0, minR = innerR, maxR = innerR;
+        if (nb >= 32) {
+            double mu = su/nb, mv = sv/nb;
+            // Kåsa fit in mean-centered coords: solve for (a,b) center & radius.
+            double Suu=0,Suv=0,Svv=0,Suz=0,Svz=0;
+            for (int i=0;i<nb;++i){
+                double du=bu[i]-mu, dv=bv[i]-mv;
+                double z=du*du+dv*dv;
+                Suu+=du*du; Suv+=du*dv; Svv+=dv*dv; Suz+=du*z; Svz+=dv*z;
+            }
+            double det = Suu*Svv - Suv*Suv;
+            if (fabs(det) > 1e-18) {
+                double a = 0.5*( Svv*Suz - Suv*Svz)/det;
+                double b = 0.5*(-Suv*Suz + Suu*Svz)/det;
+                double rr = sqrt(a*a + b*b + (Suu+Svv)/nb);
+                cu = (float)(mu + a); cv = (float)(mv + b);
+                fitR = (float)rr;
+                // Residual + min/max radius from the fitted center.
+                double acc = 0; minR = FLT_MAX; maxR = -FLT_MAX;
+                for (int i=0;i<nb;++i){
+                    float du=bu[i]-cu, dv=bv[i]-cv;
+                    float ri=sqrtf(du*du+dv*dv);
+                    minR=std::min(minR,ri); maxR=std::max(maxR,ri);
+                    float e=ri-fitR; acc+=(double)e*e;
+                }
+                rmsResid = (float)sqrt(acc/nb);
+            }
+        }
+
+        // Adopt the fitted bore: shift the stored center onto the true bore
+        // center (in-plane) so deformation is symmetric about the real hole.
+        if (fitR > 1e-7f && nb >= 32) {
+            cen.x += cu*u.x + cv*vv.x;
+            cen.y += cu*u.y + cv*vv.y;
+            cen.z += cu*u.z + cv*vv.z;
+            innerR = fitR;
+        }
+        m_ring.boreMinR       = (minR < FLT_MAX) ? minR : innerR;
+        m_ring.boreMaxR       = (maxR > -FLT_MAX) ? maxR : innerR;
+        m_ring.boreRoundnessN = rmsResid;
+        m_ring.boreOvalityPct = (innerR > 1e-7f)
+            ? (m_ring.boreMaxR - m_ring.boreMinR) / innerR * 100.f : 0.f;
+        m_ring.borePointCount = nb;
+        // Confidence: many points + low relative residual → high trust.
+        float relResid = (innerR > 1e-7f) ? rmsResid / innerR : 1.f;
+        float ptScore  = std::min(1.f, nb / 256.f);
+        float fitScore = std::max(0.f, 1.f - relResid * 12.f);
+        m_ring.boreConfidence = std::max(0.f, std::min(1.f, 0.4f*ptScore + 0.6f*fitScore));
+    }
+
     // ── Store ─────────────────────────────────────────────────────────────────
     m_ring.center        = cen;
     m_ring.axis          = axisRefined;
@@ -2466,7 +2699,7 @@ bool Renderer::analyzeRing(int meshIdx) {
 }
 
 // ── Parameters in mm ─────────────────────────────────────────────────────────
-bool Renderer::getRingParams(float out[6]) const {
+bool Renderer::getRingParams(float out[12]) const {
     if (!m_ring.valid) return false;
     float toMM = mmPerUnit();
     float curInnerMM = m_ring.currentInnerR * toMM;
@@ -2478,6 +2711,14 @@ bool Renderer::getRingParams(float out[6]) const {
     out[3] = curInnerMM * 2.f;  // inner diameter (mm)
     out[4] = curOuterMM * 2.f;  // outer diameter (mm)
     out[5] = m_ring.currentHeight * toMM;  // ring height (mm)
+    // ── Measurement-quality metrics (from the analyzeRing circle fit) ────────
+    // These describe the ORIGINAL detected bore, not the live deformation.
+    out[6]  = m_ring.boreRoundnessN * toMM;   // RMS fit residual (mm)
+    out[7]  = m_ring.boreMinR * 2.f * toMM;   // min bore diameter (mm)
+    out[8]  = m_ring.boreMaxR * 2.f * toMM;   // max bore diameter (mm)
+    out[9]  = m_ring.boreOvalityPct;          // ovality (%)
+    out[10] = m_ring.boreConfidence;          // confidence (0..1)
+    out[11] = (float)m_ring.borePointCount;   // vertices used in the fit
     return true;
 }
 

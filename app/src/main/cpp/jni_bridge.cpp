@@ -155,8 +155,11 @@ JNIEXPORT jint JNICALL Java_com_modelviewer3d_NativeLib_nativeHitTestGizmo(JNIEn
     if(!g_renderer) return -1;
     return (jint)g_renderer->hitTestGizmo((float)sx,(float)sy,(float)sw,(float)sh);
 }
-JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDrag(JNIEnv*,jclass,jfloat dx,jfloat dy,jboolean start){
-    LOCK_OR_VOID(); g_renderer->gizmoDrag((float)dx,(float)dy,start==JNI_TRUE);
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDrag(JNIEnv*,jclass,jfloat dx,jfloat dy,jint axis,jboolean start){
+    LOCK_OR_VOID(); g_renderer->gizmoDrag((float)dx,(float)dy,(int)axis,start==JNI_TRUE);
+}
+JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeGizmoDragEnd(JNIEnv*,jclass){
+    LOCK_OR_VOID(); g_renderer->gizmoDragEnd();
 }
 
 // ── Transform ────────────────────────────────────────────────────────────────
@@ -475,9 +478,9 @@ JNIEXPORT jboolean JNICALL Java_com_modelviewer3d_NativeLib_nativeAnalyzeRing(JN
     LOCK_OR_FALSE(); return g_renderer->analyzeRing((int)meshIdx) ? JNI_TRUE : JNI_FALSE;
 }
 JNIEXPORT jfloatArray JNICALL Java_com_modelviewer3d_NativeLib_nativeGetRingParams(JNIEnv* env,jclass){
-    float d[6]={0,0,0,0,0,0};
+    float d[12]={0,0,0,0,0,0,0,0,0,0,0,0};
     { LOCK_RENDERER(); if(g_renderer) g_renderer->getRingParams(d); }
-    jfloatArray arr=env->NewFloatArray(6); env->SetFloatArrayRegion(arr,0,6,d); return arr;
+    jfloatArray arr=env->NewFloatArray(12); env->SetFloatArrayRegion(arr,0,12,d); return arr;
 }
 JNIEXPORT void JNICALL Java_com_modelviewer3d_NativeLib_nativeSetRingBandWidth(JNIEnv*,jclass,jfloat w){
     LOCK_OR_VOID(); g_renderer->setRingBandWidth((float)w);

@@ -120,12 +120,44 @@ struct Mat4 {
         return v;
     }
 
-    // Normal matrix (upper-left 3x3 of transpose(inverse(model)))
-    // Returns a float[9] for upload as mat3 uniform
+    // Normal matrix = inverse-transpose of the upper-left 3x3 of the model
+    // matrix, returned as a column-major float[9] for upload as a mat3 uniform.
+    //
+    // Using the raw 3x3 is only correct for uniform scale; under NON-uniform
+    // scale (resizing W/H/D independently) it skews normals and wrecks lighting,
+    // which is why a resized model looks "ugly"/faceted.  The inverse-transpose
+    // keeps normals perpendicular to the surface for any affine transform.
     void toNormalMatrix(float out[9]) const {
-        // Simplified: extract rotation part (assumes uniform scale)
-        out[0] = m[0]; out[1] = m[1]; out[2] = m[2];
-        out[3] = m[4]; out[4] = m[5]; out[5] = m[6];
-        out[6] = m[8]; out[7] = m[9]; out[8] = m[10];
+        // Upper-left 3x3, A[row][col] (column-major storage: m[col*4+row]).
+        float a00 = m[0], a01 = m[4], a02 = m[8];
+        float a10 = m[1], a11 = m[5], a12 = m[9];
+        float a20 = m[2], a21 = m[6], a22 = m[10];
+
+        float det = a00 * (a11 * a22 - a12 * a21)
+                  - a01 * (a10 * a22 - a12 * a20)
+                  + a02 * (a10 * a21 - a11 * a20);
+
+        if (std::fabs(det) < 1e-12f) {
+            // Degenerate (an axis scaled to ~0) — fall back to the raw 3x3.
+            out[0] = a00; out[1] = a10; out[2] = a20;
+            out[3] = a01; out[4] = a11; out[5] = a21;
+            out[6] = a02; out[7] = a12; out[8] = a22;
+            return;
+        }
+        float invDet = 1.0f / det;
+        // Normal matrix N = cofactor(A) / det  ==  transpose(inverse(A)).
+        float c00 =  (a11 * a22 - a12 * a21);
+        float c01 = -(a10 * a22 - a12 * a20);
+        float c02 =  (a10 * a21 - a11 * a20);
+        float c10 = -(a01 * a22 - a02 * a21);
+        float c11 =  (a00 * a22 - a02 * a20);
+        float c12 = -(a00 * a21 - a01 * a20);
+        float c20 =  (a01 * a12 - a02 * a11);
+        float c21 = -(a00 * a12 - a02 * a10);
+        float c22 =  (a00 * a11 - a01 * a10);
+        // Store column-major: out[col*3+row] = N[row][col].
+        out[0] = c00 * invDet; out[1] = c10 * invDet; out[2] = c20 * invDet;
+        out[3] = c01 * invDet; out[4] = c11 * invDet; out[5] = c21 * invDet;
+        out[6] = c02 * invDet; out[7] = c12 * invDet; out[8] = c22 * invDet;
     }
 };
