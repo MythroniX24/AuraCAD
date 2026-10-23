@@ -54,7 +54,7 @@ A dedicated **Export sheet** (overflow menu → **💾 Export…**) covers every
 ### 🎨 UI / UX
 - Deep dark theme (`#090910` base, `#00D4FF` cyan accent), rounded bottom sheets, glassmorphism hints, colored slider tracks, live status bar (mesh / vertex / file).
 - Compact floating command header, organized bottom tool dock, professional tool screens.
-- **Background loading** — press Back while a model loads and parsing continues; a notification fires when done.
+- **Background loading** — press Back while a model loads and parsing continues; a notification fires when done
 
 ## 🧪 Testing
 Pure-JVM unit tests — run anywhere, no device or emulator needed:
