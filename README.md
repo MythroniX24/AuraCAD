@@ -88,7 +88,7 @@ Covers the ring sizing math (US ring sizes ↔ mm diameters, band geometry) and 
 ## 📁 Project Layout
 ```
 app/src/main/cpp/                    C++17 renderer, loader, separator, JNI bridge, openNURBS patch
-app/src/main/java/com/modelviewer3d/ Kotlin UI, GL surface, tool fragments, math, UISheetKit
+app/src/main/java/com/modelviewer3d/ Kotlin UI, GL surface, tool fragments, math, UISheetKit.
 app/src/test/java/com/modelviewer3d/ Pure-JVM unit tests
 .github/workflows/android.yml        CI pipeline (tests + APK build)
 ```
